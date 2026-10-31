@@ -1,0 +1,13 @@
+[Unit]
+Description=raspi-mesh emergency system time sync (loopback HTTP, proxied by nginx as /settime)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /usr/local/bin/mesh-time-sync.py 127.0.0.1 8090
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

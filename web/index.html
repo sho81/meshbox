@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DK0MAV raspi-mesh!</title>
+    <style>
+        body {
+            background-color: #111;
+            color: #0f0;
+            font-family: monospace;
+            text-align: center;
+            padding: 40px;
+        }
+        pre {
+            font-size: 18px;
+            line-height: 1.1;
+            white-space: pre;
+        }
+    </style>
+</head>
+<body>
+
+<h1>DK0MAV raspi-mesh!</h1>
+
+<pre>
+   ___  __ _____  __  ______ _   __     __  _____________ __
+  / _ \/ //_/ _ \/  |/  / _ | | / /    /  |/  / __/ __/ // /
+ / // / ,< / // / /|_/ / __ | |/ /   / /|_/ / _/_\ \/ _  /
+/____/_/|_|\___/_/  /_/_/ |_|___/  /_/  /_/___/___/_//_/
+  
+  
+</pre>
+
+<div style="width: 96%; max-width: 170ch; margin: 20px auto;">
+    <iframe id="neighborsFrame" src="/neighbors.html" title="MeshCore neighbors (FTZ Peine)"
+            style="display:block; width:100%; border: 2px solid #0f0; background:#111;
+                   box-shadow: 0 0 15px #0f0; margin:0; padding:0; border-radius:6px;"></iframe>
+</div>
+
+<script>
+(function () {
+    var f = document.getElementById("neighborsFrame");
+    function fit() {
+        try {
+            f.style.height = (f.contentDocument.documentElement.scrollHeight + 4) + "px";
+        } catch (e) {}
+    }
+    window.addEventListener("load", function () { fit(); setTimeout(fit, 300); });
+    setInterval(fit, 65000);   // re-fit after each cron update while the page stays open
+})();
+</script>
+
+</body>
+</html>

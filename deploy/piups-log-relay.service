@@ -1,0 +1,15 @@
+[Unit]
+Description=PiUPS+ debug log relay - RAM full-debug to USB stick at 5 s cadence (F16)
+After=piupsmonitor.service var-log-piupsmonitor-logs.mount
+Wants=var-log-piupsmonitor-logs.mount
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /usr/local/bin/piups-log-relay.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

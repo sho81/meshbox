@@ -1,0 +1,8 @@
+/var/log/piupsmonitor-logs/piupsmonitor.log {
+    size 50M
+    rotate 64
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

@@ -1,0 +1,33 @@
+# Full "pip freeze" of /opt/venvs/meshcore-venv on raspi-mesh (2026-10-31, python 3.13.5).
+# For byte-exact rebuilds; the readable top-level list is requirements.txt.
+bitarray==3.8.1
+bitstring==4.4.0
+bleak==3.0.2
+certifi==2026.5.20
+cffi==2.0.0
+charset-normalizer==3.4.7
+click==8.4.1
+cryptography==48.0.0
+dbus-fast==5.0.16
+esptool==5.2.0
+idna==3.17
+intelhex==2.3.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+meshcore==2.3.7
+meshcore-cli==1.5.7
+prompt_toolkit==3.0.52
+pycayennelpp==2.4.0
+pycparser==3.0
+pycryptodome==3.23.0
+Pygments==2.20.0
+pyserial==3.5
+pyserial-asyncio-fast==0.16
+PyYAML==6.0.3
+reedsolo==1.7.0
+requests==2.34.2
+rich==15.0.0
+rich-click==1.9.8
+tibs==0.5.7
+urllib3==2.7.0
+wcwidth==0.7.0

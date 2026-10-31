@@ -1,0 +1,10 @@
+# /etc/fstab (raspi-mesh) — the interesting line for this project is the last one:
+# the piupsmonitor forensic debug log lives on a dedicated small USB stick (ext4,
+# label piups-logs) so the daily debug volume wears the cheap stick instead of the
+# boot SD card. Mount by UUID (device letters shuffle between reboots), nofail +
+# device-timeout so a missing stick never blocks boot, fs pass 0 (no boot fsck).
+# Replace the UUIDs with your own (blkid).
+proc            /proc           proc    defaults          0       0
+PARTUUID=REPLACE-ME-01  /boot/firmware  vfat    defaults          0       2
+PARTUUID=REPLACE-ME-02  /               ext4    defaults,noatime  0       1
+UUID=REPLACE-ME-STICK-UUID  /var/log/piupsmonitor-logs  ext4  noatime,data=writeback,nofail,x-systemd.device-timeout=30  0 0

@@ -1,0 +1,19 @@
+# generated / runtime artifacts — never in the repo
+neighbors.html
+# live node-name map (contains real callsigns); see deploy/mesh-node-names.example.json
+mesh-node-names.json
+ports.json
+nodes-ever.json
+usb-state.json
+
+# backups kept on the box / workspace
+*.bak-*
+*.bak
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# os noise
+.DS_Store

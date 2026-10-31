@@ -1,0 +1,13 @@
+# DK0MAV mc2-Peine-Node — top-level packages of /opt/venvs/meshcore-venv (python 3.13.5)
+#
+# The engine (mesh-neighbors.py) itself needs ONLY pyserial; it is pulled in here
+# as a dependency of meshcore-cli. meshcore-cli provides the interactive "meshcli"
+# console (meshcli.sh), esptool the firmware flashing/verify tooling.
+#
+# Install:  python3 -m venv /opt/venvs/meshcore-venv
+#           /opt/venvs/meshcore-venv/bin/pip install -r requirements.txt
+#
+# Exact reproducibility: see requirements-meshcore-venv.freeze.txt (full pip freeze).
+
+meshcore-cli==1.5.7
+esptool==5.2.0

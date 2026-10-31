@@ -1,0 +1,1 @@
+* * * * * /bin/bash /usr/local/bin/meshcli-neighbors.sh >>/var/log/mesh-neighbors.log 2>&1
