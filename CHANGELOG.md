@@ -2,7 +2,7 @@
 
 ## 2026-10-31 — initial public release
 
-Feature history of the DK0MAV mc2-Peine-Node box (developed incrementally, F1–F19):
+Feature history of the DK0MAV mc2-Peine-Node box (developed incrementally, F1–F21):
 
 - Neighbor table over the MeshCore serial console: merged all-nodes-ever list
   (key prefix, name, last seen, live/best/worst SNR, sightings), persistent
@@ -18,3 +18,9 @@ Feature history of the DK0MAV mc2-Peine-Node box (developed incrementally, F1–
 - PiUPS+ power section parsed from the daemon's debug log tail (zero extra I²C
   traffic); live log on tmpfs with a compact forensic copy relayed to a USB stick
   (~98 % write traffic cut); uptime line ("Started … ago") above the updated stamp.
+- CONFIG block: all operator-tunable constants (station identity, serial probe,
+  output/state paths, clock-sync threshold, power-log tunables) gathered into one
+  clearly marked block right after the imports (F20).
+- Station identity line inside the generated page: h2 shows MeshCore (name +
+  869.618 MHz) and MeshCom (`DK0MAV-12 "Digipeater Peine"` + 433.175 MHz) from
+  constants, with a "MeshCore Neighbors" section heading above the table (F21).

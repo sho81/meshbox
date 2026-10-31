@@ -17,3 +17,7 @@ __pycache__/
 
 # os noise
 .DS_Store
+
+# IDE files (appeared in the clone 2026-10-31)
+.idea/
+*.iml

@@ -60,24 +60,60 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
+# ============================================================================
+# CONFIG — the only part of this file an operator normally edits.
+# Node identity, paths and probe/timing tunables live here, everything below
+# is mechanics. Keep derived paths (os.path.join) as they are so a single
+# change to WWW_DIR or STATE_DIR moves every file at once.
+# ============================================================================
+
+# Station identity shown in the header line of the generated page: the MeshCore
+# repeater's name + own uplink frequency, and the MeshCom unit's name + 70 cm
+# frequency (reference only — the probe itself uses neither MeshCom value).
+NODE_NAME = "Amateurfunk Peine FTZ"
+MESHCORE_FREQ = "869.618 MHz"
+MESHCOM_NAME = 'DK0MAV-12 "Digipeater Peine"'
+MESHCOM_FREQ = "433.175 MHz"
+
+# Serial probe: which ports to look at, console baud, and the quiet period that
+# marks a reply complete (replies arrive in one burst, we read until the line
+# has been silent this long).
 PORTS_GLOB = "/dev/ttyUSB*"
 BAUD = 115200
+QUIET_MS = 500
+
+# Output: the generated page (index.html embeds it) and the per-port lock files
+# that keep the cron probe and an interactive meshcli console apart.
+WWW_DIR = "/var/www/html"
+HTML_OUT = os.path.join(WWW_DIR, "neighbors.html")
 
 
 def lock_file_for(port):
     return f"/var/lock/meshcore-{os.path.basename(port)}.lock"
-WWW_DIR = "/var/www/html"
-HTML_OUT = os.path.join(WWW_DIR, "neighbors.html")
+
+# State + name map: the all-nodes-ever history, the persisted port->role mapping
+# (survives USB port swaps) and the USB watchdog state machine all live in
+# STATE_DIR; mesh-node-names.json sits next to this script (start from
+# deploy/mesh-node-names.example.json in the meshbox repo).
 NAMES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mesh-node-names.json")
-NODES_EVER_DIR = "/var/lib/meshcore"
-NODES_EVER_FILE = os.path.join(NODES_EVER_DIR, "nodes-ever.json")
-PORTS_FILE = os.path.join(NODES_EVER_DIR, "ports.json")
-USB_STATE_FILE = os.path.join(NODES_EVER_DIR, "usb-state.json")
-NODE_NAME = "Amateurfunk Peine FTZ"
-FREQ = "869.618 MHz"
+STATE_DIR = "/var/lib/meshcore"
+NODES_EVER_FILE = os.path.join(STATE_DIR, "nodes-ever.json")
+PORTS_FILE = os.path.join(STATE_DIR, "ports.json")
+USB_STATE_FILE = os.path.join(STATE_DIR, "usb-state.json")
+
+# Time sync: a MeshCore device clock lagging the Pi by more than this gets
+# "time <epoch>" pushed to it (forward moves only — the console refuses them).
+CLOCK_SYNC_LAG_S = 120
+
+# PiUPS+ power section: the debug log to tail (live log on tmpfs since F16, see
+# note further down) and how many bytes of its tail to parse (~5 s at the
+# daemon's debug rate). Data older than PIUPS_STALE_S renders as a red
+# "daemon down?" warning.
+PIUPS_LOG = "/run/piupsmonitor/live.log"
+PIUPS_TAIL_BYTES = 65536
+PIUPS_STALE_S = 90
 
 LINE_RE = re.compile(r"\b([0-9A-Fa-f]{8}):(\d{1,10}):(-?\d+)\b")
-QUIET_MS = 500          # consider the response complete after this much silence
 
 
 def log(msg):
@@ -143,11 +179,11 @@ def update_nodes_ever(rows, now_utc):
 
 
 def ensure_state_dir():
-    if not os.path.isdir(NODES_EVER_DIR):
+    if not os.path.isdir(STATE_DIR):
         try:
-            os.makedirs(NODES_EVER_DIR, exist_ok=True)
+            os.makedirs(STATE_DIR, exist_ok=True)
         except OSError as e:
-            log(f"warning: cannot create {NODES_EVER_DIR}: {e} (nodes-ever history stays empty)")
+            log(f"warning: cannot create {STATE_DIR}: {e} (nodes-ever history stays empty)")
 
 
 def read_sysfile(path):
@@ -253,7 +289,6 @@ MESHCOM_DATE_RE = re.compile(
     r"\.\.\.DATE:\s*(\d{4})\.(\d{2})\.(\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})")
 MESHCOM_UTCOFF_RE = re.compile(r"UTC-OFF\s+([+-]?\d+(?:\.\d+)?)")
 
-CLOCK_SYNC_LAG_S = 120   # auto-set the device clock when it lags this far behind the Pi
 # MeshCore "clock" reply, e.g. "  -> 11:48 - 15/5/2024 UTC" (minute precision)
 CLOCK_RE = re.compile(r"->\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2})/(\d{1,2})/(\d{4})\s+UTC")
 
@@ -550,13 +585,12 @@ def render_clock_section(infos, ntp, now_utc):
 # Timestamps are local wall time without a zone; the box has no RTC, so they are
 # converted to UTC with the system's current offset (values used here are seconds
 # old, so a DST-boundary error would be at most one year in the making).
+# (PIUPS_LOG / PIUPS_TAIL_BYTES / PIUPS_STALE_S moved up to CONFIG.)
 # F15 moved the log to the USB stick (ext4, mount /var/log/piupsmonitor-logs); F16 moves
 # the LIVE log to tmpfs (/run/piupsmonitor/live.log) so ~800 MB/day of full debug stays in
 # RAM. piups-log-relay persists a compact subset to the USB stick for forensics (status on
 # change, reading snapshot every 5 s); this engine reads the live log — fresher values and
 # no flash reads at all.
-PIUPS_LOG = "/run/piupsmonitor/live.log"
-PIUPS_TAIL_BYTES = 65536
 
 PIUPS_STATUS_RE = re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[\w+\] "
@@ -674,7 +708,7 @@ def render_piups_section(ups):
     stale_s = ups["stale_s"]
     latest_iso = (ups["latest_ts"].strftime("%Y-%m-%d %H:%M:%S UTC")
                   if ups.get("latest_ts") else "?")
-    if stale_s is not None and stale_s > 90:
+    if stale_s is not None and stale_s > PIUPS_STALE_S:
         age = (f'<span style="color:#f95" title="{htmllib.escape(latest_iso)}">'
                f'stale &mdash; data {humanize_secs(stale_s)} old, daemon down?</span>')
     else:
@@ -1096,8 +1130,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h2>DK0MAV mc&sup2;-Peine-Node &mdash; MeshCore Neighbors ({node}, {freq})</h2>
+<h2>DK0MAV mc&sup2;-Peine-Node &mdash; MeshCore: {node}, {freq} &nbsp;|&nbsp; MeshCom: {meshcom_name}, {meshcom_freq}</h2>
 {sublines}
+<h3>MeshCore Neighbors</h3>
 {table}
 {extra_sections}
 <footer>every node ever heard, merged with this run&apos;s live SNR &middot; source: repeater CLI
@@ -1280,7 +1315,9 @@ def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp
     page = HTML_TEMPLATE.format(
         iso=now_utc.isoformat(timespec="seconds"),
         started_meta=started_meta, sublines=sublines,
-        node=NODE_NAME, freq=FREQ, table=table, extra_sections=extra, src_port=src_port)
+        node=NODE_NAME, freq=MESHCORE_FREQ,
+        meshcom_name=htmllib.escape(MESHCOM_NAME), meshcom_freq=MESHCOM_FREQ,
+        table=table, extra_sections=extra, src_port=src_port)
     page = page.replace("/*__SORTJS__*/", SORT_JS)
     with open(HTML_OUT, "w", encoding="utf-8") as f:
         f.write(page)
