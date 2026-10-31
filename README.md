@@ -22,7 +22,9 @@ of paths you can adapt.
 | **PiUPS+ / Power** | UPS status bits + five traced electrical readings, parsed from the piupsmonitor daemon's debug log tail — zero extra I²C traffic |
 
 All tables are sortable (third click restores device order) and pre-sorted with visible
-sort indicators; timestamps tick live in the browser.
+sort indicators; timestamps tick live in the browser. The features carry stable internal
+change IDs (F1–F21) which also appear in engine comments and test file names — decoded
+in [FEATURES.md](FEATURES.md).
 
 ## Layout
 

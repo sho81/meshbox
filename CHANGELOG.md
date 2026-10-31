@@ -1,26 +1,30 @@
 # Changelog
 
-## 2026-10-31 — initial public release
+Deploy log by date. Feature-by-feature documentation lives in
+[FEATURES.md](FEATURES.md); the F-numbers there are the same IDs you find in
+engine comments and test file names.
 
-Feature history of the DK0MAV mc2-Peine-Node box (developed incrementally, F1–F21):
+## 2026-10-31
 
-- Neighbor table over the MeshCore serial console: merged all-nodes-ever list
-  (key prefix, name, last seen, live/best/worst SNR, sightings), persistent
-  history across reboots, sortable pre-sorted tables with live-ticking timestamps.
-- Serial port discovery and role classification (MeshCore repeater vs. MeshCom),
-  robust against USB port swaps (persisted mapping, stale flags, per-port flocks).
-- USB device watchdog: ONLINE/OFFLINE state machine for tracked peripherals,
-  pure `/sys` enumeration, survives reboots.
-- Storage section: all persistent physical disks (`sd*`, `mmcblk*`, `hd*`, NVMe)
-  with df-style total/used/available/% and mount points, per-disk partition summing.
-- Clock & NTP: repeater clock auto-sync over serial when lagging, MeshCom RTC
-  reporting, Pi NTP state, browser `/settime` emergency clock button.
-- PiUPS+ power section parsed from the daemon's debug log tail (zero extra I²C
-  traffic); live log on tmpfs with a compact forensic copy relayed to a USB stick
-  (~98 % write traffic cut); uptime line ("Started … ago") above the updated stamp.
-- CONFIG block: all operator-tunable constants (station identity, serial probe,
-  output/state paths, clock-sync threshold, power-log tunables) gathered into one
-  clearly marked block right after the imports (F20).
-- Station identity line inside the generated page: h2 shows MeshCore (name +
-  869.618 MHz) and MeshCom (`DK0MAV-12 "Digipeater Peine"` + 433.175 MHz) from
-  constants, with a "MeshCore Neighbors" section heading above the table (F21).
+- F20: CONFIG block (refactor, no behavior change)
+- F21: station identity line + "MeshCore Neighbors" heading; new `tests/test-f21.py`
+
+## 2026-10-26
+
+- F17: full date in the power table's update cells
+- F18: "Started" uptime line; `tests/test-f18.py`
+- F19: Storage section (all persistent disks); `tests/test-f19.py`
+
+## 2026-10-11
+
+- F12: USB device watchdog
+- F13: Clock & NTP always shown + emergency `/settime` time sync
+- F14: section order (power last)
+- F15: UPS debug log moved to a USB stick
+- F16: tmpfs live log + `piups-log-relay` (≈98 % less stick writes)
+
+## 2026-10-10 — initial dashboard (F1–F11)
+
+- Baseline engine, sortable neighbor table, all-nodes-ever history, port
+  role classification + swap robustness, clock auto-sync, merged nodes
+  table, pre-sorted tables, PiUPS+ / Power section
