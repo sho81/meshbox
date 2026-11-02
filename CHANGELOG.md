@@ -4,6 +4,10 @@ Deploy log by date. Feature-by-feature documentation lives in
 [FEATURES.md](FEATURES.md); the F-numbers there are the same IDs you find in
 engine comments and test file names.
 
+## 2026-11-02
+
+- F22: atomic publish of `neighbors.html` (tmp + `os.replace`); new `tests/test-f22.py`
+
 ## 2026-10-31
 
 - F20: CONFIG block (refactor, no behavior change)

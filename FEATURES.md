@@ -140,3 +140,13 @@ generated page's header now shows the full station identity (MeshCore
 repeater name + 869.618 MHz, MeshCom unit name + 433.175 MHz), and a
 "MeshCore Neighbors" section heading precedes the table like all other
 sections. Regression suite: `test-f21.py` (9 checks).
+
+## F22 · Atomic page publish — 2026-11-02
+
+`neighbors.html` is no longer written in place: the engine writes a sibling
+`neighbors.html.tmp` and `os.replace()`s it into position (same pattern as
+the state files), so a browser refreshing mid-write can never catch a
+half-written page. The tmp file inherits the target's mode. This needs
+directory write access, so on the box `/var/www/html` is group-writable
+(`root:www-data 2775`, setgid) and the engine user is in `www-data`.
+Regression suite: `test-f22.py` (5 checks).

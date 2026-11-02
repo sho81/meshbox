@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
+#!/usr/bin/env python3
 """
 mesh-neighbors.py - fetch MeshCore repeater neighbor list over serial, publish to web.
 
@@ -1319,8 +1319,19 @@ def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp
         meshcom_name=htmllib.escape(MESHCOM_NAME), meshcom_freq=MESHCOM_FREQ,
         table=table, extra_sections=extra, src_port=src_port)
     page = page.replace("/*__SORTJS__*/", SORT_JS)
-    with open(HTML_OUT, "w", encoding="utf-8") as f:
+    # F22: atomic publish — write a sibling .tmp then os.replace() so a browser
+    # refreshing mid-write never sees a half-written page (same pattern as the
+    # state files). Keep the mode of the existing target (installed 666 so the
+    # engine user can replace it and nginx can still read it).
+    tmp = HTML_OUT + ".tmp"
+    try:
+        mode = os.stat(HTML_OUT).st_mode & 0o777
+    except OSError:
+        mode = 0o644
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write(page)
+    os.chmod(tmp, mode)
+    os.replace(tmp, HTML_OUT)
 
 
 def main():
