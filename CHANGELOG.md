@@ -7,6 +7,8 @@ engine comments and test file names.
 ## 2026-11-02
 
 - F22: atomic publish of `neighbors.html` (tmp + `os.replace`); new `tests/test-f22.py`
+- F23: `log()` sanitizing (printable ASCII only) + monthly log rotation
+  (`deploy/logrotate-d-mesh-neighbors`); new `tests/test-f23.py`
 
 ## 2026-10-31
 

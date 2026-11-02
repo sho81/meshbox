@@ -1,4 +1,4 @@
-# Feature history (F1–F21)
+# Feature history (F1–F23)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -150,3 +150,15 @@ half-written page. The tmp file inherits the target's mode. This needs
 directory write access, so on the box `/var/www/html` is group-writable
 (`root:www-data 2775`, setgid) and the engine user is in `www-data`.
 Regression suite: `test-f22.py` (5 checks).
+
+## F23 · Log sanitizing — 2026-11-02
+
+The engine's `log()` passes every message through `_sanitize()`: only
+printable ASCII reaches the cron log (control chars, NUL and DEL become
+`?`; embedded newlines cannot forge extra log lines). This keeps
+grep/less/operational queries working on the whole log file — two
+historical NUL holes (reboot artifacts, not serial data) had made the
+7.8 MB log "binary" for grep; they were scrubbed once at deploy time.
+The log now also rotates monthly (`deploy/logrotate-d-mesh-neighbors`:
+rotate 6, compress, copytruncate). Regression suite: `test-f23.py`
+(5 checks).

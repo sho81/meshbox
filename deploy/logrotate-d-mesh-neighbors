@@ -1,0 +1,12 @@
+# /etc/logrotate.d/mesh-neighbors — cron log of the mesh-neighbors engine (F23).
+# The wrapper appends via shell ">>" once per minute, so copytruncate keeps
+# every append safe across rotation.
+/var/log/mesh-neighbors.log {
+    monthly
+    rotate 6
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

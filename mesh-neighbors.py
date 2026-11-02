@@ -116,9 +116,16 @@ PIUPS_STALE_S = 90
 LINE_RE = re.compile(r"\b([0-9A-Fa-f]{8}):(\d{1,10}):(-?\d+)\b")
 
 
+def _sanitize(msg):
+    # F23: keep the log pure printable ASCII — any control char (NUL holes,
+    # serial fragments echoed into warnings) would make grep/less treat the
+    # whole log file as binary. Each offending char becomes a "?".
+    return "".join(c if 0x20 <= ord(c) <= 0x7e else "?" for c in str(msg))
+
+
 def log(msg):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    print(f"[{ts}] {msg}", flush=True)
+    print(f"[{ts}] {_sanitize(msg)}", flush=True)
 
 
 def humanize_secs(s):
