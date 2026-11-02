@@ -3,7 +3,10 @@
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
 (`test-f18.py`, `test-f19.py`, `test-f21.py` — each suite regression-covers
-its feature plus the earlier ones). Dates are deploy dates on the DK0MAV
+its feature plus the earlier ones). The pre-F18 base is covered by
+`test-core.py` (F1/F4/F7/F8/F11/F12) and `test-services.py` (F13/F16);
+F2/F5/F14/F15/F17 have no suite of their own (config/process or behaviors
+already implied by the render checks). Dates are deploy dates on the DK0MAV
 mc²-Peine-Node box.
 
 ## F1–F2 · Baseline engine — before 2026-10-10

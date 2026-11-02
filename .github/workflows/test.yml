@@ -1,0 +1,34 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  suites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"          # test-f18 t6/t7 JS harness
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: test-core (F1/F4/F7/F8/F11/F12)
+        run: python3 tests/test-core.py mesh-neighbors.py
+      - name: test-services (F13/F16)
+        run: python3 tests/test-services.py mesh-time-sync.py piups-log-relay.py
+      - name: test-f18
+        run: python3 tests/test-f18.py mesh-neighbors.py
+      - name: test-f19
+        run: python3 tests/test-f19.py mesh-neighbors.py
+      - name: test-f21
+        run: python3 tests/test-f21.py mesh-neighbors.py web/index.html
+      - name: test-f22
+        run: python3 tests/test-f22.py mesh-neighbors.py
+      - name: test-f23
+        run: python3 tests/test-f23.py mesh-neighbors.py

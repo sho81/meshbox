@@ -9,6 +9,9 @@ engine comments and test file names.
 - F22: atomic publish of `neighbors.html` (tmp + `os.replace`); new `tests/test-f22.py`
 - F23: `log()` sanitizing (printable ASCII only) + monthly log rotation
   (`deploy/logrotate-d-mesh-neighbors`); new `tests/test-f23.py`
+- Tests: `test-core.py` backfills regression coverage for the pre-F18 features
+  (F1/F4/F7/F8/F11/F12), `test-services.py` covers the companion daemons
+  (F13/F16); GitHub Actions runs all 7 suites on every push
 
 ## 2026-10-31
 

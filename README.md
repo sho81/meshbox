@@ -75,12 +75,21 @@ authenticated** — keep it on a trusted LAN/hamnet segment or add auth yourself
 ## Tests
 
 The suites in `tests/` run anywhere (pure stdlib, synthetic `/sys` and log fixtures,
-no repeater needed; `node` is used for one JS harness):
+no repeater needed; `node` is used for one JS harness). `test-core.py` covers the
+foundational behaviors (F1/F4/F7/F8/F11/F12), `test-services.py` the two companion
+daemons (F13/F16), the `test-fNN.py` suites their feature plus the earlier ones:
 
 ```
+python3 tests/test-core.py mesh-neighbors.py
+python3 tests/test-services.py mesh-time-sync.py piups-log-relay.py
 python3 tests/test-f18.py mesh-neighbors.py
 python3 tests/test-f19.py mesh-neighbors.py
+python3 tests/test-f21.py mesh-neighbors.py web/index.html
+python3 tests/test-f22.py mesh-neighbors.py
+python3 tests/test-f23.py mesh-neighbors.py
 ```
+
+All suites run on every push via GitHub Actions (`.github/workflows/test.yml`).
 
 ## License
 
