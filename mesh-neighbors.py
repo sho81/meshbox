@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: MIT
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 mesh-neighbors.py - fetch MeshCore repeater neighbor list over serial, publish to web.
 
@@ -25,6 +25,11 @@ a hint, because the MeshCore console accepts forward moves only. Each MeshCom po
 queried with "--pos" (reply "...DATE: YYYY.MM.DD HH:MM:SS LT"), converted to UTC using
 its configured "UTC-OFF" from --info and shown as a delta; that unit keeps its own RTC
 via NTP, so the Pi only reports it. System NTP state comes from timedatectl.
+F24 adds manual per-row sync: a Clock & NTP row button POSTs the visitor's epoch to
+mesh-time-sync.py, which writes a one-shot marker (settime-request.json) that the next
+run consumes — "time <epoch>" on MeshCore (verified by an immediate "clock" re-read) or
+"--settime yyyy.mm.dd hh:mm:ss" in device-local time on MeshCom (verified by a "--pos"
+re-read); the outcome shows in that row's status cell.
 
 The neighbor table is one merged list of every node ever heard (state in nodes-ever.json):
 this run's rows add the live SNR, older rows show their last-seen age plus best/worst
@@ -104,6 +109,13 @@ USB_STATE_FILE = os.path.join(STATE_DIR, "usb-state.json")
 # Time sync: a MeshCore device clock lagging the Pi by more than this gets
 # "time <epoch>" pushed to it (forward moves only — the console refuses them).
 CLOCK_SYNC_LAG_S = 120
+
+# F24: manual per-row time sync. mesh-time-sync.py writes a one-shot request
+# marker here when a Clock & NTP row button targets a serial device; this engine
+# consumes it during the next cron run (probe applies it under the per-port
+# flock and verifies immediately). Requests older than this are dropped.
+SETTIME_REQUEST = os.path.join(STATE_DIR, "settime-request.json")
+SETTIME_MAX_AGE_S = 900
 
 # PiUPS+ power section: the debug log to tail (live log on tmpfs since F16, see
 # note further down) and how many bytes of its tail to parse (~5 s at the
@@ -331,8 +343,12 @@ def system_ntp_status():
     return info
 
 
-def probe_port(port, serial_mod, now_utc=None):
-    """One per-port probe: classify role + collect details + neighbor entries."""
+def probe_port(port, serial_mod, now_utc=None, manual=None):
+    """One per-port probe: classify role + collect details + neighbor entries.
+
+    manual: optional F24 request {"target": port, "epoch": int} to push this
+    visitor's clock to this device (applied only when target == port).
+    """
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
     res = dict(usb_os_info(port))
@@ -373,14 +389,26 @@ def probe_port(port, serial_mod, now_utc=None):
             # sending "time <epoch>"; a device running ahead only gets a hint on the
             # page (the MeshCore console accepts forward moves only).
             dev_dt = parse_clock_reply(send_cmd(ser, "clock"))
+            want_epoch = manual["epoch"] if manual and manual["target"] == port else None
+            if want_epoch is not None:
+                # F24 manual sync: push the visitor's epoch, then re-read the clock
+                # to verify. The automatic lag sync is skipped this run — the
+                # requested time may deliberately differ from the Pi's.
+                send_cmd(ser, f"time {want_epoch}")
+                dev_dt = parse_clock_reply(send_cmd(ser, "clock")) or dev_dt
             if dev_dt is not None:
                 lag_s = int((now_utc - dev_dt).total_seconds())
                 synced = False
-                if lag_s > CLOCK_SYNC_LAG_S:
+                if want_epoch is None and lag_s > CLOCK_SYNC_LAG_S:
                     send_cmd(ser, f"time {int(now_utc.timestamp())}")
                     synced = True
                 res["clock"] = {"device": dev_dt.strftime("%Y-%m-%d %H:%M UTC"),
                                 "lag_s": lag_s, "synced": synced}
+                if want_epoch is not None:
+                    vd = int(dev_dt.timestamp()) - want_epoch
+                    res["clock"]["manual"] = {"verify_delta_s": vd, "ok": abs(vd) <= 90}
+            elif want_epoch is not None:
+                log(f"manual sync on {port}: sent, but no clock reply to verify")
         else:                                # not a repeater -> try MeshCom info block
             raw_info = send_cmd(ser, "--info", 5.0)
             mi = MESHCOM_INFO_RE.search(raw_info)
@@ -403,9 +431,10 @@ def probe_port(port, serial_mod, now_utc=None):
 
                 # Device clock: --pos reports local time, subtract the configured
                 # offset to get UTC. The unit self-syncs its RTC via NTP, so we only
-                # report a delta (manual fix would be "--settime yyyy.mm.dd hh:mm:ss").
+                # report a delta (F24 adds the manual per-row set button).
                 off = MESHCOM_UTCOFF_RE.search(raw_info)
                 md = MESHCOM_DATE_RE.search(send_cmd(ser, "--pos", 5.0))
+                want_epoch = manual["epoch"] if manual and manual["target"] == port else None
                 if off and md:
                     y, mo, d, hh, mi_, ss = (int(g) for g in md.groups())
                     try:
@@ -418,6 +447,33 @@ def probe_port(port, serial_mod, now_utc=None):
                         res["clock"] = {"device": dev_utc.strftime("%Y-%m-%d %H:%M:%S UTC"),
                                         "lag_s": int((now_utc - dev_utc).total_seconds()),
                                         "synced": False}
+                        if want_epoch is not None:
+                            # F24 manual sync. The MeshCom CLI wants LOCAL time
+                            # (local = UTC + UTC-OFF, same convention --pos shows).
+                            loc = (datetime.fromtimestamp(want_epoch, timezone.utc)
+                                   + timedelta(hours=float(off.group(1))))
+                            send_cmd(ser, f"--settime {loc:%Y.%m.%d %H:%M:%S}")
+                            md2 = MESHCOM_DATE_RE.search(send_cmd(ser, "--pos", 5.0))
+                            set_utc = None
+                            if md2:
+                                try:
+                                    set_utc = (datetime(*(int(g) for g in md2.groups()))
+                                               - timedelta(hours=float(off.group(1)))
+                                               ).replace(tzinfo=timezone.utc)
+                                except ValueError:
+                                    set_utc = None
+                            vd = (int(set_utc.timestamp()) - want_epoch
+                                  if set_utc is not None else None)
+                            res["clock"]["manual"] = {"verify_delta_s": vd,
+                                                      "ok": vd is not None and abs(vd) <= 10}
+                            if set_utc is not None:
+                                res["clock"]["device"] = set_utc.strftime(
+                                    "%Y-%m-%d %H:%M:%S UTC")
+                                res["clock"]["lag_s"] = int(
+                                    (now_utc - set_utc).total_seconds())
+                    elif want_epoch is not None:
+                        log(f"manual sync on {port}: cannot read --pos clock, "
+                            "--settime skipped")
             else:
                 res["details"] = "- (unrecognized reply)"
     except Exception as e:                   # USB glitch / device vanished mid-probe
@@ -506,42 +562,107 @@ def apply_port_persistence(infos, now_utc):
     return state
 
 
+def load_manual_sync_request():
+    """F24: consume the one-shot manual time-sync marker written by mesh-time-sync.py.
+
+    Returns {"target": "/dev/ttyUSBx", "epoch": int} or None. The marker file is
+    always deleted here (processed, stale or malformed — never retried forever);
+    shape/range checks mirror the service side as defense in depth.
+    """
+    try:
+        with open(SETTIME_REQUEST, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        log(f"warning: unreadable manual-sync request at {SETTIME_REQUEST}: {e}")
+        try:
+            os.remove(SETTIME_REQUEST)
+        except OSError:
+            pass
+        return None
+    try:
+        os.remove(SETTIME_REQUEST)
+    except OSError as e:
+        log(f"warning: could not remove {SETTIME_REQUEST}: {e}")
+    target, epoch = data.get("target"), data.get("epoch")
+    if (not isinstance(target, str) or not re.fullmatch(r"/dev/ttyUSB\d+", target)
+            or not isinstance(epoch, int) or isinstance(epoch, bool)
+            or not (10 ** 8 < epoch < 4 * 10 ** 9)):
+        log(f"manual-sync request discarded: bad shape {str(data)[:120]}")
+        return None
+    age = int(time.time()) - int(data.get("requested") or 0)
+    if age > SETTIME_MAX_AGE_S or age < -60:
+        log(f"manual-sync request for {target} discarded: {age} s old")
+        return None
+    log(f"manual time sync requested for {target} (epoch {epoch}, age {age} s)")
+    return {"target": target, "epoch": epoch}
+
+
 def clock_status_text(c, role):
+    m = c.get("manual")
+    if m:
+        vd = m.get("verify_delta_s")
+        if vd is None:
+            return "manual sync sent \u2014 no verification reply, check the next update"
+        if m.get("ok"):
+            return f"manual sync verified (\u0394 to requested time {vd:+d} s)"
+        return (f"manual sync sent, device still {humanize_secs(abs(vd))} off the "
+                "requested time")
     if c["synced"]:
         return f"auto-synced this run (was {humanize_secs(c['lag_s'])} behind)"
     if c["lag_s"] < 0:
         return (f"running ahead by {humanize_secs(-c['lag_s'])}; Pi should win, "
                 "check the device manually")
     if role == "meshcom" and c["lag_s"] > CLOCK_SYNC_LAG_S:
-        # MeshCom keeps its own RTC via NTP; we do not overwrite it from here.
-        return (f"{humanize_secs(c['lag_s'])} behind; self-syncs via NTP, use "
-                "'--settime yyyy.mm.dd hh:mm:ss' (UTC) if this persists")
+        # MeshCom keeps its own RTC via NTP; we do not overwrite it automatically.
+        return (f"{humanize_secs(c['lag_s'])} behind; self-syncs via NTP, use the "
+                "button to set it from your device if this persists")
     return "ok"
 
 
-SYNC_BUTTON_HTML = """
-<p style="margin:6px 0 0;font-size:12px">
-<button id="btn-synctime" type="button" onclick="__synchTime()"
-        title="Sets the Pi's system clock to THIS device's current time (UTC). Emergency fallback for when NTP is unavailable; anyone who can open this page can use it."
-        style="font-family:monospace;font-size:12px;cursor:pointer;">set system time from your device</button>
-<span id="synctime-result" style="color:#575"></span></p>
+# F24: one manual-sync button per Clock & NTP row (render_clock_section emits the
+# .tbtn buttons); this delegated handler POSTs browser epoch + row target.
+MANUAL_SYNC_JS = """
 <script>
-function __synchTime() {
-    var res = document.getElementById("synctime-result");
-    var epoch = Math.floor(Date.now() / 1000);   // seconds — timezone-agnostic by definition
-    if (!confirm('Set raspi-mesh system time to\\n' + new Date(epoch * 1000).toUTCString() +\n                '?\\n\\nUses THIS device\\'s clock (emergency fallback if NTP is down).')) return;
-    res.textContent = "setting…";
-    fetch("/settime", {method: "POST", headers: {"Content-Type": "application/json"},
-                      body: JSON.stringify({epoch: epoch})})
-      .then(function (r) { return r.json(); })
-      .then(function (d) { res.textContent = d.ok ? ("ok — Pi now reads " + d.now_utc) : ("error: " + (d.error || "unknown")); })
-      .catch(function (e) { res.textContent = "error: " + e; });
-}
+(function () {
+    var tbl = document.getElementById('tbl-clock');
+    if (!tbl) return;
+    tbl.addEventListener('click', function (ev) {
+        var btn = ev.target.closest ? ev.target.closest('button.tbtn') : null;
+        if (!btn) return;
+        var res = btn.parentNode.querySelector('.tresult');
+        var epoch = Math.floor(Date.now() / 1000);   // seconds — timezone-agnostic by definition
+        var target = btn.getAttribute('data-target') || '';
+        var what = target || 'raspi-mesh system time';
+        if (!confirm('Set ' + what + ' to\\n' + new Date(epoch * 1000).toUTCString()
+                     + '\\n\\nUses THIS device\\'s clock (manual sync; NTP stays preferred).')) return;
+        res.textContent = 'sending\\u2026';
+        var body = {epoch: epoch};
+        if (target) body.target = target;
+        fetch('/settime', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                           body: JSON.stringify(body)})
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+              if (!d.ok) { res.textContent = 'error: ' + (d.error || 'unknown'); return; }
+              res.textContent = d.queued
+                  ? 'queued \\u2014 runs with the next update (\\u2248 1 min)'
+                  : 'ok \\u2014 Pi now reads ' + d.now_utc;
+          })
+          .catch(function (e) { res.textContent = 'error: ' + e; });
+    });
+})();
 </script>"""
 
 
 def render_clock_section(infos, ntp, now_utc):
-    """All clocks in one table: the Pi system clock first, then each device clock."""
+    """All clocks in one sortable table (F24).
+
+    Row order: the Pi system clock (pinned to the top at every sort), then one
+    row per device clock, then the visitor's own "local device time" last. Every
+    settable row carries its own manual-sync button; the local row has none —
+    its clock IS the source every button sends.
+    """
     synced = str(ntp.get("synced", "-")).lower()
     ntp_svc = str(ntp.get("ntp", "-")).lower()
     if synced == "yes":
@@ -553,31 +674,58 @@ def render_clock_section(infos, ntp, now_utc):
     else:
         pi_status = '<span style="color:#f95">NTP service not active</span>'
 
+    def set_btn(target, title):
+        return (f'<button type="button" class="tbtn" data-target="{target}" '
+                f'title="{title}">set from your device</button>'
+                '<span class="tresult"></span>')
+
+    now_txt = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
     trs = []
-    # F13: dedicated system-clock row — the reference every device Δ is measured against.
+    # F13/F24: dedicated system-clock row, pinned first at every sort order.
+    pi_title = ("Set the raspi-mesh system clock to THIS device's current time "
+                "(UTC). Fallback for when NTP is unavailable.")
     trs.append(
-        '<tr data-order="0">'
+        '<tr data-order="0" data-pin="top">'
         "<td>raspi-mesh (system)</td>"
-        f'<td data-sort="{now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")}">'
-        f'{now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")}</td>'
+        f'<td data-sort="{now_txt}">{now_txt}</td>'
         '<td class="num" title="reference clock (all &Delta; measured against this)">&mdash;</td>'
-        f"<td>{pi_status}</td></tr>")
-    for i, p in enumerate(x for x in infos if x.get("clock")):
+        f"<td>{pi_status}</td>"
+        f"<td>{set_btn('', pi_title)}</td></tr>")
+    for i, p in enumerate(x for x in infos or [] if x.get("clock")):
         c = p["clock"]
-        sign = "+" if c["lag_s"] >= 0 else "-"
+        if c["lag_s"] == 0:
+            delta = "0s"
+        else:
+            sign = "+" if c["lag_s"] > 0 else "-"
+            delta = f"{sign}{humanize_secs(abs(c['lag_s']))}"
+        role_lbl = ROLE_LABEL.get(p["role"], p["role"])
+        port_title = (f'Set {p["port"]} ({role_lbl}) to THIS device&#39;s current '
+                      "time (UTC). Runs with the next update; the verification "
+                      "result shows here.")
         trs.append(
             f'<tr data-order="{i + 1}">'
             f"<td>{p['port']}</td>"
             f'<td data-sort="{c["device"]}">{c["device"]}</td>'
-            f'<td class="num" data-sort="{c["lag_s"]}">{sign}{humanize_secs(abs(c["lag_s"]))}</td>'
-            f"<td>{htmllib.escape(clock_status_text(c, p['role']))}</td></tr>")
+            f'<td class="num" data-sort="{c["lag_s"]}">{delta}</td>'
+            f"<td>{htmllib.escape(clock_status_text(c, p['role']))}</td>"
+            f"<td>{set_btn(p['port'], port_title)}</td></tr>")
+    # F24: the visitor's own clock — source of every manual sync, hence no button;
+    # the ticker script keeps it live to the second.
+    trs.append(
+        '<tr data-order="99">'
+        "<td>local device time (this browser)</td>"
+        f'<td data-sort="{now_txt}"><span id="local-clock">{now_txt}</span></td>'
+        '<td class="num" title="this clock is what the buttons send">&mdash;</td>'
+        "<td>reference for the manual sync column</td>"
+        "<td>&mdash;</td></tr>")
     table = ('<table class="sortable" id="tbl-clock"><thead><tr>'
              '<th>Port</th><th>Device time (UTC)</th><th class="num">&Delta; vs Pi</th>'
-             f'<th>Status</th></tr></thead><tbody>{"".join(trs)}</tbody></table>')
+             '<th>Status</th><th>Manual sync</th>'
+             f'</tr></thead><tbody>{"".join(trs)}</tbody></table>')
     line = (f"system: time zone {htmllib.escape(ntp.get('tz', '-'))} &middot; "
             f"NTP service: {htmllib.escape(ntp.get('ntp', '-'))} &middot; "
             f"time synchronized: {htmllib.escape(ntp.get('synced', '-'))}")
-    return (table + SYNC_BUTTON_HTML
+    return (table + MANUAL_SYNC_JS
             + f'\n<p style="font-size:11px;color:#575">{line}</p>')
 
 
@@ -1134,6 +1282,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     table.sortable thead th:hover {{ background:#1c331c; }}
     .sortarrow {{ display:inline-block; min-width:8px; margin-left:4px; color:#3d5c3d; font-size:11px; }}
     th[data-mode] .sortarrow {{ color:#7f7; }}
+    .tbtn {{ background:#000; color:#7f7; border:1px solid #7f7; border-radius:3px;
+             font-family:'Courier New',monospace; font-size:11px; padding:2px 8px; cursor:pointer; }}
+    .tbtn:hover {{ background:#7f7; color:#000; }}
+    .tresult {{ color:#575; font-size:11px; margin-left:6px; }}
 </style>
 </head>
 <body>
@@ -1158,6 +1310,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('started').textContent =
                 t1.toISOString().replace('T', ' ').slice(0, 19) + " UTC (" + human(u) + " ago)";
         }}
+        var lc = document.getElementById('local-clock');   // F24: viewer's own clock, live
+        if (lc) lc.textContent = new Date().toISOString().replace('T', ' ').slice(0, 19) + " UTC";
     }}
     function human(s) {{
         if (s < 60) return s + " s";
@@ -1189,7 +1343,10 @@ SORT_JS = """(function () {
                 ths[j].removeAttribute('data-mode');
                 ths[j].querySelector('.sortarrow').textContent = '\\u2195';
             }
-            var rows = Array.prototype.slice.call(t.tBodies[0].rows);
+            var all = Array.prototype.slice.call(t.tBodies[0].rows);
+            // F24: rows with data-pin stay on top for every sort direction.
+            var pinned = all.filter(function (r) { return r.getAttribute('data-pin'); });
+            var rows = all.filter(function (r) { return !r.getAttribute('data-pin'); });
             if (next) {
                 th.setAttribute('data-mode', next);
                 th.querySelector('.sortarrow').textContent = next === 'asc' ? '\\u25b2' : '\\u25bc';
@@ -1212,7 +1369,7 @@ SORT_JS = """(function () {
                 });
             }
             var tbody = t.tBodies[0];
-            rows.forEach(function (r) { tbody.appendChild(r); });
+            pinned.concat(rows).forEach(function (r) { tbody.appendChild(r); });
         }
         for (var i = 0; i < ths.length; i++) (function (th, idx) {
             var arrow = document.createElement('span');
@@ -1296,7 +1453,7 @@ def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp
     # F19: physical storage (sd*) with size/usage/mounts — between watchdog and clock.
     if storages is not None:
         sections.append("<h3>Storage</h3>\n" + render_storage_html(storages))
-    # F13: always shown — the Pi system row and the emergency time-sync button must be
+    # F13: always shown — the Pi system row and the manual time-sync buttons must be
     # visible even when no device clock is present (that is often exactly when NTP is down).
     if ntp is not None:
         sections.append("<h3>Clock &amp; NTP</h3>\n"
@@ -1355,7 +1512,11 @@ def main():
         return 1
 
     now_utc = datetime.now(timezone.utc)
-    infos = [probe_port(p, pyserial, now_utc) for p in ports]
+    # F24: pick up (and consume) a queued manual time-sync request from the
+    # dashboard service before probing, so the matching port probe applies it
+    # under the normal per-port flock and verifies it in the same run.
+    manual = load_manual_sync_request()
+    infos = [probe_port(p, pyserial, now_utc, manual=manual) for p in ports]
     ensure_state_dir()
 
     # F7: merge live classification with the persisted mapping (ports.json).

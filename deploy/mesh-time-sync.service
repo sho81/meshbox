@@ -1,5 +1,5 @@
 [Unit]
-Description=raspi-mesh emergency system time sync (loopback HTTP, proxied by nginx as /settime)
+Description=raspi-mesh manual time sync (loopback HTTP, proxied by nginx as /settime)
 After=network.target
 
 [Service]

@@ -18,7 +18,7 @@ of paths you can adapt.
 | **USB serial devices** | every `/dev/ttyUSB*` probed and classified (MeshCore repeater vs. MeshCom) using OS info + one serial command per port; survives USB port swaps |
 | **USB device watchdog** | ONLINE/OFFLINE state machine for every tracked peripheral (serial bridges, storage sticks) driven purely from `/sys` enumeration — catches a stick that silently disappeared, even across reboots |
 | **Storage** | every persistent physical disk (`sd*`, `mmcblk*`, `hd*`, NVMe; zram/loop excluded): total size, used, available, %, mount points — df semantics summed per disk |
-| **Clock & NTP** | device clocks of the repeater (auto-syncs the repeater when it lags) and the MeshCom GPS/RTC unit, plus the Pi's own NTP state; a browser button can emergency-set the Pi's clock via `/settime` |
+| **Clock & NTP** | device clocks of the repeater (auto-syncs the repeater when it lags) and the MeshCom GPS/RTC unit, plus the Pi's own NTP state and your browser's clock; a per-row button can manually set any clock (Pi or attached device) from the browser via `/settime` |
 | **PiUPS+ / Power** | UPS status bits + five traced electrical readings, parsed from the piupsmonitor daemon's debug log tail — zero extra I²C traffic |
 
 All tables are sortable (third click restores device order) and pre-sorted with visible
@@ -87,6 +87,7 @@ python3 tests/test-f19.py mesh-neighbors.py
 python3 tests/test-f21.py mesh-neighbors.py web/index.html
 python3 tests/test-f22.py mesh-neighbors.py
 python3 tests/test-f23.py mesh-neighbors.py
+python3 tests/test-f24.py mesh-neighbors.py mesh-time-sync.py
 ```
 
 All suites run on every push via GitHub Actions (`.github/workflows/test.yml`).

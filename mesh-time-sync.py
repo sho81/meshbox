@@ -1,26 +1,36 @@
 #!/usr/bin/python3
 # SPDX-License-Identifier: MIT
-"""mesh-time-sync — emergency system-clock sync for raspi-mesh (F13).
+"""mesh-time-sync — manual time sync for raspi-mesh (F13, F24).
 
 A tiny HTTP service bound to loopback only. nginx proxies /settime to it, so
-the dashboard's "set system time from your device" button can set CLOCK_REALTIME
-from the visitor's browser clock when NTP is unavailable.
+the dashboard's per-row "set from your device" buttons can set clocks from
+the visitor's browser clock when NTP is unavailable.
 
 Endpoints:
     GET  /           -> {"ok": true, "now_utc": "..."}          (health check)
     POST /settime    body: {"epoch": <seconds since 1970>}      (sets system time)
                       -> {"ok": true, "applied_epoch": N, "delta_s": D, "now_utc": "..."}
+    POST /settime    body: {"epoch": ..., "target": "/dev/ttyUSBx"}   (F24)
+                      -> {"ok": true, "queued": true, "target": "..."}
+                      Writes a one-shot request marker; the dashboard engine
+                      (mesh-neighbors.py, cron every minute) applies it to the
+                      device under its per-port serial flock — MeshCore
+                      "time <epoch>" or MeshCom "--settime" — and verifies the
+                      result there. Serial ports are never touched from here.
 
 Validation (defense in depth):
     * absolute range 1e8..4e9  -> catches unit bugs such as milliseconds
                                   (years ~1973 .. ~2096)
     * |epoch - now| <= 5 y     -> sane maximum for a drifted box with no RTC
+    * target must be /dev/ttyUSB<digits> (the engine re-validates)
 
 Runs as root (clock_settime needs CAP_SYS_TIME). Stdlib only, so it uses the
 system python3 and has no venv dependency. Logs to stderr -> journal:
     journalctl -u mesh-time-sync
 """
 import json
+import os
+import re
 import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +41,21 @@ DEFAULT_PORT = 8090
 EPOCH_ABS_MIN = 10 ** 8        # ~1973
 EPOCH_ABS_MAX = 4 * 10 ** 9    # ~2096
 MAX_DELTA_S = 5 * 366 * 86400  # 5 years
+
+# F24: request marker consumed by mesh-neighbors.py (must match its CONFIG).
+REQUEST_FILE = "/var/lib/meshcore/settime-request.json"
+TARGET_RE = re.compile(r"^/dev/ttyUSB\d+$")
+
+
+def queue_serial_request(target, epoch_s, now_dt):
+    """Atomically write the F24 marker so the engine run applies it. Returns path."""
+    os.makedirs(os.path.dirname(REQUEST_FILE), exist_ok=True)
+    tmp = REQUEST_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"target": target, "epoch": epoch_s,
+                   "requested": int(now_dt.timestamp())}, f)
+    os.replace(tmp, REQUEST_FILE)
+    return REQUEST_FILE
 
 
 def check_epoch(epoch_s, now_dt):
@@ -93,6 +118,7 @@ class Handler(BaseHTTPRequestHandler):
             epoch = data["epoch"]
             if isinstance(epoch, float) and epoch.is_integer():
                 epoch = int(epoch)
+            target = data.get("target") or ""
         except (ValueError, KeyError, TypeError):
             return self._json(400, {"ok": False,
                                     "error": 'expected JSON body {"epoch": <seconds>}'})
@@ -100,6 +126,18 @@ class Handler(BaseHTTPRequestHandler):
         ok, err = check_epoch(epoch, now)
         if not ok:
             return self._json(400, {"ok": False, "error": err})
+        if target:
+            if not TARGET_RE.fullmatch(target):
+                return self._json(400, {"ok": False,
+                                        "error": "target must be /dev/ttyUSB<digits> or empty"})
+            try:
+                queue_serial_request(target, epoch, now)
+            except OSError as e:
+                return self._json(500, {"ok": False, "error": f"queue write failed: {e}"})
+            sys.stderr.write("queued manual sync for %s (epoch %d) -> %s\n"
+                             % (target, epoch, REQUEST_FILE))
+            return self._json(200, {"ok": True, "queued": True, "target": target,
+                                    "applied_epoch": epoch})
         old_s = int(now.timestamp())
         try:
             new_dt = apply_clock(epoch)

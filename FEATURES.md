@@ -1,4 +1,4 @@
-# Feature history (F1–F23)
+# Feature history (F1–F24)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -85,7 +85,8 @@ reference for all deltas. A "set system time from your device" button POSTs
 the visitor's browser clock to `/settime`, which nginx proxies to a loopback
 service (`mesh-time-sync.py`, ch. in README) that sets `CLOCK_REALTIME` —
 an emergency path for cold boots without NTP. Unauthenticated by design:
-keep it on a trusted segment.
+keep it on a trusted segment. (Superseded by F24: the button became a
+per-row "set from your device", now covering the serial devices too.)
 
 ## F14 · Section order — 2026-10-11
 
@@ -165,3 +166,34 @@ historical NUL holes (reboot artifacts, not serial data) had made the
 The log now also rotates monthly (`deploy/logrotate-d-mesh-neighbors`:
 rotate 6, compress, copytruncate). Regression suite: `test-f23.py`
 (5 checks).
+
+## F24 · Manual per-row time sync — 2026-11-06
+
+The F13 "emergency time sync" became **manual time sync**, and the single
+button under the Clock & NTP table was cloned into every row. The table grew
+a dedicated fifth column "Manual sync" (buttons aligned in one vertical
+line; the local-time row shows `—` there). Its flat black/green
+"set from your device" buttons (`.tbtn`) send the browser's epoch plus that
+row's target to `/settime`.
+
+- Pi row: unchanged path — `clock_settime` right away.
+- `/dev/ttyUSB*` rows: the service writes a one-shot marker
+  (`/var/lib/meshcore/settime-request.json`, atomic tmp+rename) and answers
+  `{"queued": true}`. The engine's next cron run consumes it: it re-probes
+  the port anyway, so the role decision (MeshCore 869 MHz vs MeshCom
+  433 MHz) uses the fresh live classification with the persisted `ports.json`
+  fallback (F7) — robust against USB renumbering. Under the normal per-port
+  flock it sends `time <epoch>` (MeshCore) or `--settime yyyy.mm.dd hh:mm:ss`
+  in device-local time (MeshCom, UTC + UTC-OFF), then re-reads the clock
+  ("clock" / "--pos") and shows "manual sync verified (Δ …)" in that row.
+- New last row "local device time (this browser)": the visitor's own clock,
+  live to the second via the ticker script — the source every button sends,
+  so it has no button itself.
+- The Pi system row is pinned to the top of the table at every sort order
+  (`data-pin` handling in `SORT_JS`).
+- A measured Δ of exactly 0 renders as `0s` (ports with no readable clock
+  still show `—`).
+
+The automatic lag sync (F8, MeshCore lag > `CLOCK_SYNC_LAG_S`) is unchanged;
+a manual request just suppresses it for that one run. Regression suite:
+`test-f24.py` (16 checks).

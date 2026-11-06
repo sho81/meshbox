@@ -4,6 +4,15 @@ Deploy log by date. Feature-by-feature documentation lives in
 [FEATURES.md](FEATURES.md); the F-numbers there are the same IDs you find in
 engine comments and test file names.
 
+## 2026-11-06
+
+- F24: manual time sync redesign — "set from your device" button in every
+  Clock & NTP row (flat black/green `.tbtn`); serial targets queue a marker
+  that the engine applies+verifies on the next run (`time <epoch>` on
+  MeshCore, `--settime` in device-local time on MeshCom); new "local device
+  time" row; Pi row pinned first at every sort; Δ 0 renders `0s`;
+  new `tests/test-f24.py`
+
 ## 2026-11-02
 
 - F22: atomic publish of `neighbors.html` (tmp + `os.replace`); new `tests/test-f22.py`

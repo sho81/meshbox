@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """F18 checks — "Started <boot time> (... ago)" uptime line above the Updated line.
 
 Run:  python3 test-f18.py [engine-path]     (default: ./mesh-neighbors.py)
@@ -76,7 +75,8 @@ TICKER_RE = re.compile(r"<script>(.*?)</script>", re.S)
 
 
 def extract_ticker(page_html):
-    # The page carries other <script> blocks too (F13 __synchTime inside the Clock & NTP
+    # The page carries other <script> blocks too (F13/F24 manual-sync handler inside the
+    # Clock & NTP
     # section, SORT_JS at the end); pick the ticker by its content marker.
     for m in TICKER_RE.finditer(page_html):
         if "meta[name=updated]" in m.group(1) and "setInterval" in m.group(1):
@@ -173,11 +173,12 @@ check("t5 F19 section order kept (Storage between watchdog and clock)",
 i_s = page5.find('<div class="sub">Started')
 i_u = page5.find('<div class="sub">Updated')
 check("t5 Started above Updated (all sections)", 0 <= i_s < i_u)
-# The full page also carries the F13 __synchTime script and SORT_JS — extraction must
-# still find the ticker IIFE (regression guard: a naive "first <script>" pick fails here).
+# The full page also carries the F13/F24 manual-sync handler script and SORT_JS —
+# extraction must still find the ticker IIFE (regression guard: a naive "first
+# <script>" pick fails here).
 ticker_full = extract_ticker(page5)
 check("t5 ticker extracted from full page", "meta[name=started]" in ticker_full
-      and "__synchTime" not in ticker_full and "sortarrow" not in ticker_full)
+      and "button.tbtn" not in ticker_full and "sortarrow" not in ticker_full)
 
 # ---------------------------------------------------------------- t6-t8 JS
 HARNESS = r"""
