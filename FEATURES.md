@@ -1,4 +1,4 @@
-# Feature history (F1–F24)
+# Feature history (F1–F25)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -196,4 +196,30 @@ row's target to `/settime`.
 
 The automatic lag sync (F8, MeshCore lag > `CLOCK_SYNC_LAG_S`) is unchanged;
 a manual request just suppresses it for that one run. Regression suite:
-`test-f24.py` (16 checks).
+`test-f24.py` (17 checks).
+
+## F25 · Temperatures table — 2026-11-06
+
+Sensor survey on the box first: the Pi 3 B+ has exactly **one** physical thermal
+sensor — the SoC thermal zone (`/sys/class/thermal/thermal_zone0`, mirrored as
+hwmon `cpu_thermal`). `vcgencmd measure_temp` and every `-m cpu|core|gpu|soc|pmu`
+variant read that same sensor through the GPU mailbox (measured identical on the
+box), `rpi_volt` is a voltage hwmon, and there are no 1-wire devices, no
+`/sys/class/power_supply` entries and no temperature in the PiUPS+ data. So the
+new **Temperatures** section shows a single row.
+
+- Table `Source | Now | Abs min (UTC) | Abs max (UTC)`, everything in °C,
+  sortable like all others; the min/max cells carry the recorded date+time
+  under the number (`data-sort` keeps the columns numeric).
+- Positioned after Clock & NTP, before PiUPS+ / Power (operator's choice).
+- Reader: kernel thermal sysfs (millidegrees) first, `vcgencmd measure_temp`
+  as fallback when no zone is readable; sane range −50…150 °C only.
+- Absolute min/max are **permanent across reboots**, sampled every cron
+  minute and stored in `/var/lib/meshcore/temps-ever.json` (same pattern as
+  the nodes-ever / usb-state files); the file is rewritten only when an
+  extreme actually changes, and deleting it resets the history.
+- Future hardware with more zones gets its own rows automatically
+  (`cpu-thermal` → "SoC", `gpu-thermal` → "GPU"; unknown zone types keep
+  their kernel name).
+
+Regression suite: `test-f25.py` (19 checks).

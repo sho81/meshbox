@@ -34,3 +34,5 @@ jobs:
         run: python3 tests/test-f23.py mesh-neighbors.py
       - name: test-f24
         run: python3 tests/test-f24.py mesh-neighbors.py mesh-time-sync.py
+      - name: test-f25
+        run: python3 tests/test-f25.py mesh-neighbors.py

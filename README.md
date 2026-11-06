@@ -19,18 +19,19 @@ of paths you can adapt.
 | **USB device watchdog** | ONLINE/OFFLINE state machine for every tracked peripheral (serial bridges, storage sticks) driven purely from `/sys` enumeration — catches a stick that silently disappeared, even across reboots |
 | **Storage** | every persistent physical disk (`sd*`, `mmcblk*`, `hd*`, NVMe; zram/loop excluded): total size, used, available, %, mount points — df semantics summed per disk |
 | **Clock & NTP** | device clocks of the repeater (auto-syncs the repeater when it lags) and the MeshCom GPS/RTC unit, plus the Pi's own NTP state and your browser's clock; a per-row button can manually set any clock (Pi or attached device) from the browser via `/settime` |
+| **Temperatures** | one row per thermal source (the Pi 3 B+ has exactly one: the SoC) with the current reading and the permanent absolute min/max incl. date+time (UTC) — state survives reboots in `temps-ever.json`, delete it to reset |
 | **PiUPS+ / Power** | UPS status bits + five traced electrical readings, parsed from the piupsmonitor daemon's debug log tail — zero extra I²C traffic |
 
 All tables are sortable (third click restores device order) and pre-sorted with visible
 sort indicators; timestamps tick live in the browser. The features carry stable internal
-change IDs (F1–F21) which also appear in engine comments and test file names — decoded
+change IDs (F1–F25) which also appear in engine comments and test file names — decoded
 in [FEATURES.md](FEATURES.md).
 
 ## Layout
 
 ```
 mesh-neighbors.py        the engine: probe -> state -> HTML (run every minute by cron)
-mesh-time-sync.py        tiny loopback HTTP service for the /settime emergency clock button
+mesh-time-sync.py        tiny loopback HTTP service for manual time sync (/settime)
 piups-log-relay.py       tails the RAM debug log, writes a compact forensic copy to a USB stick
 tools/                   small helper scripts (meshcli console wrappers, apt update, temps)
 deploy/                  systemd units, nginx snippet, crontab, tmpfiles, logrotate, fstab,
@@ -88,6 +89,7 @@ python3 tests/test-f21.py mesh-neighbors.py web/index.html
 python3 tests/test-f22.py mesh-neighbors.py
 python3 tests/test-f23.py mesh-neighbors.py
 python3 tests/test-f24.py mesh-neighbors.py mesh-time-sync.py
+python3 tests/test-f25.py mesh-neighbors.py
 ```
 
 All suites run on every push via GitHub Actions (`.github/workflows/test.yml`).

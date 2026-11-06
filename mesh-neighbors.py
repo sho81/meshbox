@@ -40,7 +40,9 @@ and stale handling live in ports.json, see /var/lib/meshcore).
 Outputs (written directly; files must exist with write permission for user db4sjp):
     /var/www/html/neighbors.html   HTML page embedded into index.html:
         merged neighbor table, PiUPS+ power section (electrical values + status),
-        USB serial device table, clock/NTP status.
+        USB serial device table, clock/NTP status, temperatures table (F25: the
+        SoC sensor via thermal sysfs with vcgencmd fallback + permanent
+        absolute min/max in temps-ever.json).
 
 The PiUPS+ section (F11) does not touch the I2C bus at all: it parses the tail of
 the piupsmonitor debug log (LogLevel=debug). F15 moved that log off the SD card;
@@ -105,6 +107,13 @@ STATE_DIR = "/var/lib/meshcore"
 NODES_EVER_FILE = os.path.join(STATE_DIR, "nodes-ever.json")
 PORTS_FILE = os.path.join(STATE_DIR, "ports.json")
 USB_STATE_FILE = os.path.join(STATE_DIR, "usb-state.json")
+TEMPS_STATE_FILE = os.path.join(STATE_DIR, "temps-ever.json")
+
+# F25: temperature sources. Primary are the kernel thermal zones (millidegrees
+# in sysfs); vcgencmd measure_temp is the fallback reader for the same SoC
+# sensor when no zone is exposed. Both stay well below the 100 s cron budget.
+THERMAL_GLOB = "/sys/class/thermal/thermal_zone*"
+VCGENCMD = "/usr/bin/vcgencmd"
 
 # Time sync: a MeshCore device clock lagging the Pi by more than this gets
 # "time <epoch>" pushed to it (forward moves only — the console refuses them).
@@ -1257,6 +1266,145 @@ def render_storage_html(storages):
             f"<th>Mounted at</th></tr></thead><tbody>{''.join(trs)}</tbody></table>")
 
 
+# ---------------------------------------------------------------------------
+# Temperatures (F25)
+#
+# The Pi 3 B+ has exactly ONE physical thermal sensor: the SoC thermal zone.
+# vcgencmd measure_temp (also with -m cpu/gpu/core/soc/pmu) reads that same
+# sensor through the GPU mailbox - measured identical on the box - so it is a
+# fallback reader, never a second table row. Should future hardware expose
+# more zones (gpu-thermal, a w1 1-wire sensor...), extra rows appear on their
+# own; THERMAL_TYPE_LABEL maps kernel zone types to display names.
+# Absolute min/max are permanent across reboots in TEMPS_STATE_FILE (same
+# pattern as nodes-ever.json / usb-state.json); reset = delete the file.
+
+THERMAL_TYPE_LABEL = {"cpu-thermal": "SoC", "gpu-thermal": "GPU"}
+VCGENCMD_TEMP_RE = re.compile(r"temp=(-?\d+(?:\.\d+)?)'C")
+
+
+def read_temps(thermal_glob=THERMAL_GLOB, vcgencmd=VCGENCMD):
+    """Current temperatures in degC, one entry per sensor source (F25).
+
+    Primary source are the kernel thermal zones (millidegrees in sysfs); only
+    the sane range -50..150 degC survives (an unbound sensor reads absurd
+    values). When no zone could be read at all, fall back to
+    vcgencmd measure_temp — same SoC sensor on this hardware, labelled
+    "SoC" either way.
+    """
+    temps = []
+    for zone in sorted(glob.glob(thermal_glob)):
+        try:
+            with open(os.path.join(zone, "temp"), encoding="ascii") as f:
+                raw = int(f.read().strip())
+            with open(os.path.join(zone, "type"), encoding="ascii") as f:
+                ztype = f.read().strip()
+        except (OSError, ValueError):
+            continue
+        c = round(raw / 1000.0, 1)
+        if -50 < c < 150:
+            temps.append({"source": THERMAL_TYPE_LABEL.get(ztype, ztype or zone),
+                          "c": c})
+    if not temps and os.access(vcgencmd, os.X_OK):
+        try:
+            out = subprocess.run([vcgencmd, "measure_temp"],
+                                 capture_output=True, text=True, timeout=5).stdout
+            m = VCGENCMD_TEMP_RE.search(out)
+            c = round(float(m.group(1)), 1) if m else None
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            c = None
+        if c is not None and -50 < c < 150:
+            temps.append({"source": "SoC", "c": c})
+    return temps
+
+
+def load_temps_ever(path=TEMPS_STATE_FILE):
+    """Absolute min/max history per source; {} when absent or corrupt (F25)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        srcs = data.get("sources", {})
+        return srcs if isinstance(srcs, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def update_temps_ever(temps, now_utc, path=TEMPS_STATE_FILE):
+    """Merge this run's readings into the permanent min/max state (F25).
+
+    Each source keeps {"min", "min_at", "max", "max_at"}; the timestamps use
+    the same "... UTC" format as the other state files. Sources that vanish
+    from the readings keep their history; records with junk values are
+    reinitialised from the current reading (self-healing). Written atomically
+    (tmp + os.replace) only when a value actually changed; the merged dict is
+    returned for rendering."""
+    ever = load_temps_ever(path)
+    stamp = now_utc.strftime("%Y-%m-%d %H:%M UTC")
+    changed = False
+    for t in temps:
+        rec = ever.get(t["source"])
+        c = t["c"]
+        if not isinstance(rec, dict) or not all(
+                isinstance(rec.get(k), (int, float)) for k in ("min", "max")):
+            ever[t["source"]] = {"min": c, "min_at": stamp, "max": c, "max_at": stamp}
+            changed = True
+            continue
+        if c < rec["min"]:
+            rec["min"], rec["min_at"] = c, stamp
+            changed = True
+        if c > rec["max"]:
+            rec["max"], rec["max_at"] = c, stamp
+            changed = True
+        ever[t["source"]] = rec
+    if changed:
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"updated": stamp, "sources": ever}, f, indent=1)
+            os.replace(tmp, path)          # atomic: readers never see a partial file
+        except OSError as e:
+            log(f"warning: could not write {path}: {e}")
+    return ever
+
+
+def render_temps_html(temps, ever):
+    """Temperatures table (F25): Source | Now | Abs min | Abs max, all in degC.
+
+    The min/max cells show the recorded date+time (UTC) under the number;
+    data-sort carries the plain value so the shared sort JS orders the
+    columns numerically."""
+    sources = sorted({t["source"] for t in temps} | set(ever or {}))
+    if not sources:
+        return '<div class="none">no temperature sensor found</div>'
+    now_by_src = {t["source"]: t["c"] for t in temps}
+
+    def temp_cell(value, when=None):
+        if value is None:
+            return "<td>-</td>"
+        txt = f"{value:.1f} &deg;C"
+        if when:
+            txt += ('<br><span style="font-size:11px;color:#575">'
+                    f"{htmllib.escape(str(when))}</span>")
+        return f'<td class="num" data-sort="{value:.1f}">{txt}</td>'
+
+    trs = []
+    for i, src in enumerate(sources):
+        rec = ever.get(src) or {}
+        trs.append(
+            f'<tr data-order="{i}">'
+            f"<td>{htmllib.escape(src)}</td>"
+            + temp_cell(now_by_src.get(src))
+            + temp_cell(rec.get("min"), rec.get("min_at"))
+            + temp_cell(rec.get("max"), rec.get("max_at"))
+            + "</tr>")
+    table = ('<table class="sortable" id="tbl-temps"><thead><tr><th>Source</th>'
+             '<th class="num">Now</th><th class="num">Abs min (UTC)</th>'
+             f'<th class="num">Abs max (UTC)</th></tr></thead><tbody>{"".join(trs)}</tbody></table>')
+    return (table + '\n<p style="font-size:11px;color:#575;margin:4px 0 0">'
+            'one physical sensor on the Pi 3 B+ (the SoC); vcgencmd cpu/gpu reads share it '
+            "&middot; min/max are permanent across reboots in "
+            "/var/lib/meshcore/temps-ever.json (delete that file to reset)</p>")
+
+
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1437,7 +1585,7 @@ def build_merged_table(rows, state, now_utc):
 
 
 def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp=None,
-               ups=None, wd_devices=None, storages=None):
+               ups=None, wd_devices=None, storages=None, temps=None, temps_ever=None):
     if nodes_ever is not None:
         table = build_merged_table(rows, nodes_ever, now_utc)
     else:
@@ -1458,6 +1606,11 @@ def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp
     if ntp is not None:
         sections.append("<h3>Clock &amp; NTP</h3>\n"
                         + render_clock_section(usb_infos, ntp, now_utc))
+    # F25: Temperatures table — positioned by user spec (2026-11-06): after the
+    # clock, before the power section.
+    if temps is not None:
+        sections.append("<h3>Temperatures</h3>\n"
+                        + render_temps_html(temps, temps_ever))
     # F14: readings last — user's choice (2026-10-11): the PiUPS+ / Power section moved from
     # first among the extras to the end of the page.
     if ups is not None:
@@ -1532,6 +1685,10 @@ def main():
     wd_devices = usb_watchdog(now_utc)
     # F19: physical storage overview (sd* disks, df-style usage per disk).
     storages = storage_info()
+    # F25: temperature readings + permanent absolute min/max history (survives
+    # reboots like the other state files; delete temps-ever.json to reset).
+    temps = read_temps()
+    temps_ever = update_temps_ever(temps, now_utc)
 
     cores = [p for p in infos if p["role"] == "meshcore"]
     if len(cores) > 1:
@@ -1553,7 +1710,8 @@ def main():
 
     nodes_ever = update_nodes_ever(rows, now_utc)
     write_html(rows, now_utc, nodes_ever, usb_infos=infos, src_port=src_port, ntp=ntp,
-               ups=ups, wd_devices=wd_devices, storages=storages)
+               ups=ups, wd_devices=wd_devices, storages=storages,
+               temps=temps, temps_ever=temps_ever)
     def _role_tag(p):
         return p["role"] + ("(stale)" if p.get("stale") else "")
     roles = ", ".join(f"{os.path.basename(p['port'])}={_role_tag(p)}" for p in infos)
@@ -1569,9 +1727,11 @@ def main():
     wd_tag = f"usb-wd {len(wd_devices) - len(wd_offline)}/{len(wd_devices)} online"
     if wd_offline:
         wd_tag += " (offline: " + ", ".join(sorted(set(wd_offline))) + ")"
+    temps_tag = ("temps " + " ".join(f"{t['source']}={t['c']}C" for t in temps)
+                 if temps else "temps none")
     log(f"ok: {roles}; {len(entries)} raw entries -> {len(rows)} unique node(s); "
         f"{len(nodes_ever)} node(s) in all-nodes-ever state; wrote {HTML_OUT}; "
-        f"{piups_tag}; {wd_tag}")
+        f"{piups_tag}; {wd_tag}; {temps_tag}")
     return 0 if core is not None else 1
 
 

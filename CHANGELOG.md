@@ -12,6 +12,10 @@ engine comments and test file names.
   MeshCore, `--settime` in device-local time on MeshCom); new "local device
   time" row; Pi row pinned first at every sort; Δ 0 renders `0s`;
   new `tests/test-f24.py`
+- F25: **Temperatures section** — one row per thermal source (single SoC
+  sensor on the Pi 3 B+), current reading + permanent absolute min/max with
+  date+time (UTC) in `temps-ever.json`; sysfs-first with `vcgencmd`
+  fallback; new `tests/test-f25.py`
 
 ## 2026-11-02
 
