@@ -4,6 +4,14 @@ Deploy log by date. Feature-by-feature documentation lives in
 [FEATURES.md](FEATURES.md); the F-numbers there are the same IDs you find in
 engine comments and test file names.
 
+## 2026-11-21
+
+- F26: **Network interfaces section** — one row per interface (lo omitted):
+  state, MAC, all IPv4/IPv6 addresses with scope labels and lease hints,
+  default-route tag + gateway footer, Hamnet static routes as footer line;
+  sourced from `ip -j addr show`/`ip -j route show` (two iproute2 JSON
+  dialects handled); new `tests/test-f26.py`
+
 ## 2026-11-06
 
 - F24: manual time sync redesign — "set from your device" button in every

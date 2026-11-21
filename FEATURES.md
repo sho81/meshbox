@@ -1,4 +1,4 @@
-# Feature history (F1–F25)
+# Feature history (F1–F26)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -223,3 +223,35 @@ new **Temperatures** section shows a single row.
   their kernel name).
 
 Regression suite: `test-f25.py` (19 checks).
+
+## F26 · Network interfaces table — 2026-11-21
+
+"How do I connect to this box right now?" — a live snapshot of every
+interface (operator's spec: one row per interface, IPv4 + IPv6, positioned
+after the USB watchdog and before Storage).
+
+- Source is iproute2 JSON (`ip -j addr show` + `ip -j route show`, one
+  read each per run — same subprocess style as the timedatectl/vcgencmd
+  reads). Two iproute2 JSON dialects are handled: MAC under `mac` or
+  `address`, default route as `dst "default"` or omitted/null, protocol
+  key `proto` or `protocol`, lease seconds under `valid_lft` or
+  `valid_life_time` (iproute2 6.15 on the box omits them in plain JSON —
+  then dynamic addresses just show `dynamic`).
+- `lo` is dropped; any other interface (AP mode, tunnels, future add-ons)
+  appears automatically. State comes from the `UP`/`LOWER_UP` flags
+  (`UP` / `up, no carrier` / `DOWN`).
+- Table `Interface | State | MAC | IPv4 | IPv6`; extra addresses stack
+  inside a cell. IPv6 gets scope labels: **global** (2001::-style),
+  **ULA** (fd/fc), **link** (fe80::). Dynamic addresses show their lease
+  remainder ("lease 42 m 06 s") when the JSON carries one — the box's
+  public IPv6 rotates every ~40 min, so this table is where you read the
+  current one.
+- The interface holding the default route (lowest metric) is tagged in
+  its name cell; the footer shows the default gateway + source address
+  and the grouped static routes — the Hamnet referrals get a
+  `(Hamnet)` tag: `44.0.0.0/9, 44.128.0.0/10 via 192.168.3.1 dev eth0`.
+- No state file by design: interface *history* is the USB watchdog's
+  (F12) job; this section answers the question for right now.
+- The cron ok-line grew a `net eth0=UP/192.168.3.10 wlan0=UP/…` tag.
+
+Regression suite: `test-f26.py` (18 checks, both iproute2 dialects).

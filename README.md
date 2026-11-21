@@ -17,6 +17,7 @@ of paths you can adapt.
 | **Neighbors** | merged table of every node ever heard: key prefix, name, last seen (d/h/m), live SNR, best/worst SNR, sightings. All-nodes-ever history survives reboots via a small JSON state file |
 | **USB serial devices** | every `/dev/ttyUSB*` probed and classified (MeshCore repeater vs. MeshCom) using OS info + one serial command per port; survives USB port swaps |
 | **USB device watchdog** | ONLINE/OFFLINE state machine for every tracked peripheral (serial bridges, storage sticks) driven purely from `/sys` enumeration — catches a stick that silently disappeared, even across reboots |
+| **Network interfaces** | one row per interface (lo omitted): link state, MAC and every IPv4/IPv6 address with scope labels (global/ULA/link) and dynamic-lease hints; default route tagged, Hamnet referrals as footer line — your "how do I connect here" table |
 | **Storage** | every persistent physical disk (`sd*`, `mmcblk*`, `hd*`, NVMe; zram/loop excluded): total size, used, available, %, mount points — df semantics summed per disk |
 | **Clock & NTP** | device clocks of the repeater (auto-syncs the repeater when it lags) and the MeshCom GPS/RTC unit, plus the Pi's own NTP state and your browser's clock; a per-row button can manually set any clock (Pi or attached device) from the browser via `/settime` |
 | **Temperatures** | one row per thermal source (the Pi 3 B+ has exactly one: the SoC) with the current reading and the permanent absolute min/max incl. date+time (UTC) — state survives reboots in `temps-ever.json`, delete it to reset |
@@ -24,7 +25,7 @@ of paths you can adapt.
 
 All tables are sortable (third click restores device order) and pre-sorted with visible
 sort indicators; timestamps tick live in the browser. The features carry stable internal
-change IDs (F1–F25) which also appear in engine comments and test file names — decoded
+change IDs (F1–F26) which also appear in engine comments and test file names — decoded
 in [FEATURES.md](FEATURES.md).
 
 ## Layout
@@ -90,6 +91,7 @@ python3 tests/test-f22.py mesh-neighbors.py
 python3 tests/test-f23.py mesh-neighbors.py
 python3 tests/test-f24.py mesh-neighbors.py mesh-time-sync.py
 python3 tests/test-f25.py mesh-neighbors.py
+python3 tests/test-f26.py mesh-neighbors.py
 ```
 
 All suites run on every push via GitHub Actions (`.github/workflows/test.yml`).

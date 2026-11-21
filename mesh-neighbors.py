@@ -40,7 +40,9 @@ and stale handling live in ports.json, see /var/lib/meshcore).
 Outputs (written directly; files must exist with write permission for user db4sjp):
     /var/www/html/neighbors.html   HTML page embedded into index.html:
         merged neighbor table, PiUPS+ power section (electrical values + status),
-        USB serial device table, clock/NTP status, temperatures table (F25: the
+        USB serial device table, network interfaces table (F26: state + all
+        IPv4/IPv6 addresses with scope/lease labels from iproute2 JSON),
+        clock/NTP status, temperatures table (F25: the
         SoC sensor via thermal sysfs with vcgencmd fallback + permanent
         absolute min/max in temps-ever.json).
 
@@ -114,6 +116,10 @@ TEMPS_STATE_FILE = os.path.join(STATE_DIR, "temps-ever.json")
 # sensor when no zone is exposed. Both stay well below the 100 s cron budget.
 THERMAL_GLOB = "/sys/class/thermal/thermal_zone*"
 VCGENCMD = "/usr/bin/vcgencmd"
+
+# F26: network interface snapshot via iproute2 JSON (`ip -j addr show` +
+# `ip -j route show`, one read each per run).
+IP_CMD = "/usr/sbin/ip"
 
 # Time sync: a MeshCore device clock lagging the Pi by more than this gets
 # "time <epoch>" pushed to it (forward moves only — the console refuses them).
@@ -1405,6 +1411,154 @@ def render_temps_html(temps, ever):
             "/var/lib/meshcore/temps-ever.json (delete that file to reset)</p>")
 
 
+# ---------------------------------------------------------------------------
+# Network interfaces (F26)
+#
+# Live overview of how to reach this box: one table row per interface (lo
+# dropped - it tells nobody how to connect) with link state, MAC and every
+# IPv4/IPv6 address incl. scope labels (global / ULA / link) and lease hints
+# for dynamic addresses (the public IPv6 rotates every ~40 min; the page is
+# the natural place to read the current one). Source is iproute2 JSON, one
+# subprocess read each per run (same style as timedatectl / vcgencmd).
+# No state file: this is a snapshot by design - interface *history* is the
+# USB watchdog's job (F12). Static non-default routes (the Hamnet 44/8
+# referrals via eth0) show as one compact footer line.
+
+def network_info(ip_cmd=IP_CMD):
+    """Live interface + route snapshot (F26); {} when iproute2 is unusable."""
+
+    def ip_json(args):
+        try:
+            out = subprocess.run([ip_cmd, "-j"] + args, capture_output=True,
+                                 text=True, timeout=5).stdout
+            data = json.loads(out)
+            return data if isinstance(data, list) else None
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            return None
+
+    addrs, routes = ip_json(["addr", "show"]), ip_json(["route", "show"])
+    if addrs is None or routes is None:
+        return {}
+
+    # Default route: older iproute2 writes dst "default", newer omits/nulls
+    # it; the route protocol key is "proto" (new) or "protocol" (this box).
+    # Lowest metric wins.
+    def is_default(r):
+        return (r.get("dst") or "default") == "default"
+
+    def rproto(r):
+        return r.get("proto") or r.get("protocol") or ""
+
+    defaults = sorted((r for r in routes if is_default(r)),
+                      key=lambda r: r.get("metric") or 0)
+    default = defaults[0] if defaults else {}
+
+    # Static non-default routes grouped by gateway+dev (Hamnet 44/8 lines).
+    groups = {}
+    for r in routes:
+        if r.get("dst") and not is_default(r) and rproto(r) == "static":
+            groups.setdefault((r.get("gateway") or "-", r.get("dev") or "-"), []).append(r["dst"])
+    statics = []
+    for (gw, dev), dsts in sorted(groups.items()):
+        tag = " (Hamnet)" if any(d.startswith("44.") for d in dsts) else ""
+        statics.append(f"{', '.join(sorted(dsts))} via {gw} dev {dev}{tag}")
+
+    ifaces = []
+    for a in addrs:
+        name = a.get("ifname") or "?"
+        if name == "lo":
+            continue
+        flags = a.get("flags") or []
+        if "LOWER_UP" in flags and "UP" in flags:
+            state = "UP"
+        elif "UP" in flags:
+            state = "up, no carrier"
+        else:
+            state = "DOWN"
+        v4, v6 = [], []
+        for ai in a.get("addr_info") or []:
+            lease = ai.get("valid_lft")
+            if not isinstance(lease, int):
+                lease = ai.get("valid_life_time")   # iproute2 >= 6.x key
+            entry = {"addr": ai.get("local") or "?", "prefix": ai.get("prefixlen"),
+                     "dynamic": bool(ai.get("dynamic")),
+                     "lease_s": lease if isinstance(lease, int) else None}
+            if ai.get("family") == "inet":
+                v4.append(entry)
+            elif ai.get("family") == "inet6":
+                addr6 = entry["addr"]
+                if addr6.startswith("fe80:"):
+                    entry["scope"] = "link"
+                elif addr6.startswith(("fd", "fc")):
+                    entry["scope"] = "ULA"
+                else:
+                    entry["scope"] = "global"
+                v6.append(entry)
+        ifaces.append({"iface": name, "state": state,
+                       "mac": a.get("mac") or a.get("address") or "-",
+                       "v4": v4, "v6": v6,
+                       "default": bool(default.get("dev") == name)})
+    return {"ifaces": ifaces, "default": default, "statics": statics}
+
+
+def render_network_html(nets):
+    """Network interfaces table (F26): Interface | State | MAC | IPv4 | IPv6.
+
+    Extra addresses of one interface stack inside their cell; scope labels
+    and dynamic-lease remainders render in the small grey style. The
+    interface carrying the default route is tagged in its name cell."""
+    ifaces = (nets or {}).get("ifaces") or []
+    if not ifaces:
+        return '<div class="none">no network info (iproute2 unreadable?)</div>'
+
+    def addr_cell(entries):
+        if not entries:
+            return "<td>&mdash;</td>"
+        parts = []
+        for e in entries:
+            txt = f"{e['addr']}/{e['prefix']}"
+            extras = []
+            if e.get("scope"):
+                extras.append(e["scope"])
+            if e.get("dynamic"):
+                if isinstance(e.get("lease_s"), int) and 0 < e["lease_s"] < 4294967295:
+                    extras.append(f"lease {humanize_secs(e['lease_s'])}")
+                else:
+                    # some iproute2 JSON builds omit lifetimes entirely
+                    extras.append("dynamic")
+            if extras:
+                txt += (' <span style="font-size:11px;color:#575">('
+                        + " ".join(extras) + ")</span>")
+            parts.append(txt)
+        return "<td>" + "<br>".join(parts) + "</td>"
+
+    trs = []
+    for i, d in enumerate(ifaces):
+        badge = (' <span style="font-size:11px;color:#575">(default route)</span>'
+                 if d.get("default") else "")
+        trs.append(
+            f'<tr data-order="{i}">'
+            f'<td data-sort="{htmllib.escape(d["iface"])}">{htmllib.escape(d["iface"])}{badge}</td>'
+            f"<td>{htmllib.escape(d['state'])}</td>"
+            f"<td>{htmllib.escape(d['mac'])}</td>"
+            + addr_cell(d["v4"]) + addr_cell(d["v6"]) + "</tr>")
+    table = ('<table class="sortable" id="tbl-net"><thead><tr><th>Interface</th>'
+             "<th>State</th><th>MAC</th><th>IPv4</th>"
+             f'<th>IPv6</th></tr></thead><tbody>{"".join(trs)}</tbody></table>')
+    lines = []
+    default = (nets or {}).get("default") or {}
+    if default:
+        line = (f"default route via {default.get('dev', '?')}: gateway "
+                f"{default.get('gateway', '-')}")
+        if default.get("prefsrc"):
+            line += f", source {default['prefsrc']}"
+        lines.append(line)
+    lines.extend((nets or {}).get("statics") or [])
+    footer = " &middot; ".join(htmllib.escape(ln) for ln in lines) if lines else "no routes reported"
+    return (table + '\n<p style="font-size:11px;color:#575;margin:4px 0 0">'
+            + footer + "</p>")
+
+
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1585,7 +1739,8 @@ def build_merged_table(rows, state, now_utc):
 
 
 def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp=None,
-               ups=None, wd_devices=None, storages=None, temps=None, temps_ever=None):
+               ups=None, wd_devices=None, storages=None, temps=None, temps_ever=None,
+               nets=None):
     if nodes_ever is not None:
         table = build_merged_table(rows, nodes_ever, now_utc)
     else:
@@ -1598,6 +1753,9 @@ def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp
     if wd_devices is not None:
         sections.append("<h3>USB device watchdog</h3>\n"
                         + render_usb_watchdog_html(wd_devices, now_utc))
+    # F26: how to reach the box — between watchdog and storage (user spec 2026-11-21).
+    if nets is not None:
+        sections.append("<h3>Network interfaces</h3>\n" + render_network_html(nets))
     # F19: physical storage (sd*) with size/usage/mounts — between watchdog and clock.
     if storages is not None:
         sections.append("<h3>Storage</h3>\n" + render_storage_html(storages))
@@ -1689,6 +1847,8 @@ def main():
     # reboots like the other state files; delete temps-ever.json to reset).
     temps = read_temps()
     temps_ever = update_temps_ever(temps, now_utc)
+    # F26: live network interface snapshot (iproute2 JSON; no state file).
+    nets = network_info()
 
     cores = [p for p in infos if p["role"] == "meshcore"]
     if len(cores) > 1:
@@ -1711,7 +1871,7 @@ def main():
     nodes_ever = update_nodes_ever(rows, now_utc)
     write_html(rows, now_utc, nodes_ever, usb_infos=infos, src_port=src_port, ntp=ntp,
                ups=ups, wd_devices=wd_devices, storages=storages,
-               temps=temps, temps_ever=temps_ever)
+               temps=temps, temps_ever=temps_ever, nets=nets)
     def _role_tag(p):
         return p["role"] + ("(stale)" if p.get("stale") else "")
     roles = ", ".join(f"{os.path.basename(p['port'])}={_role_tag(p)}" for p in infos)
@@ -1729,9 +1889,15 @@ def main():
         wd_tag += " (offline: " + ", ".join(sorted(set(wd_offline))) + ")"
     temps_tag = ("temps " + " ".join(f"{t['source']}={t['c']}C" for t in temps)
                  if temps else "temps none")
+    if (nets or {}).get("ifaces"):
+        net_tag = "net " + " ".join(
+            f"{d['iface']}={'UP' if d['state'] == 'UP' else 'DOWN'}"
+            + (f"/{d['v4'][0]['addr']}" if d["v4"] else "") for d in nets["ifaces"])
+    else:
+        net_tag = "net none (iproute2 unreadable)"
     log(f"ok: {roles}; {len(entries)} raw entries -> {len(rows)} unique node(s); "
         f"{len(nodes_ever)} node(s) in all-nodes-ever state; wrote {HTML_OUT}; "
-        f"{piups_tag}; {wd_tag}; {temps_tag}")
+        f"{piups_tag}; {wd_tag}; {temps_tag}; {net_tag}")
     return 0 if core is not None else 1
 
 
