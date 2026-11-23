@@ -169,6 +169,9 @@ def lock_file_for(port):
 NAMES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mesh-node-names.json")
 STATE_DIR = "/var/lib/meshcore"
 NODES_EVER_FILE = os.path.join(STATE_DIR, "nodes-ever.json")
+# F32: same all-nodes-ever idea for the MeshCom side (433 cm-wave mesh). The
+# device's own --mheard memory is only a 12 h window; our state persists.
+MESHCOM_EVER_FILE = os.path.join(STATE_DIR, "meshcom-nodes-ever.json")
 # F31: prefix(8 hex) -> full 64-hex public key, refreshed on demand from the
 # public map.meshcore.io database (mesh-keymap.py); box-local, no secrets —
 # every key in it is already public on the map.
@@ -320,6 +323,58 @@ def update_nodes_ever(rows, now_utc):
     return state
 
 
+def load_meshcom_ever():
+    try:
+        with open(MESHCOM_EVER_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {str(k).upper(): v for k, v in data.items()}
+    except (OSError, ValueError) as e:
+        log(f"warning: no valid meshcom-ever state at {MESHCOM_EVER_FILE} ({e})")
+    return {}
+
+
+def update_meshcom_ever(mh_rows, now_utc):
+    """F32: merge this run's --mheard rows into the all-stations-ever state.
+
+    The device forgets after 12 h (window=720min) and on every reboot; the
+    dashboard keeps first/last sighting, sightings count and best/worst SNR
+    indefinitely — the same idea as nodes-ever.json on the MeshCore side.
+    """
+    state = load_meshcom_ever()
+    for r in mh_rows:
+        key = str(r.get("call", "")).upper()
+        if not key:
+            continue
+        try:
+            db = round(float(r.get("snr_db", 0.0)), 2)
+            age_s = max(0, int(r.get("age_s", 0)))
+        except (TypeError, ValueError):
+            continue
+        seen_iso = datetime.fromtimestamp(now_utc.timestamp() - age_s,
+                                          timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        e = state.get(key)
+        if e is None:
+            state[key] = {"first": seen_iso, "last": seen_iso, "sightings": 1,
+                          "best_db": db, "worst_db": db, "gw": r.get("gw", "N")}
+        elif e.get("last") == seen_iso:
+            continue                     # same heard event re-served every run
+        else:
+            e["last"] = max(e.get("last", ""), seen_iso)
+            e["sightings"] = int(e.get("sightings", 0)) + 1
+            e["best_db"] = round(max(float(e.get("best_db", db)), db), 2)
+            e["worst_db"] = round(min(float(e.get("worst_db", db)), db), 2)
+            if r.get("gw") == "Y":
+                e["gw"] = "Y"
+    try:
+        with open(MESHCOM_EVER_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, sort_keys=True)
+            f.write("\n")
+    except OSError as e:
+        log(f"warning: could not write {MESHCOM_EVER_FILE}: {e}")
+    return state
+
+
 def ensure_state_dir():
     if not os.path.isdir(STATE_DIR):
         try:
@@ -393,6 +448,35 @@ def parse_neighbor_entries(text):
         key, age, snr = m.group(1).upper(), int(m.group(2)), int(m.group(3))
         entries.append((key, age, snr))
     return entries
+
+
+# F32: MeshCom 4.40a answers --mheard with one key=value line per heard
+# station, e.g.
+#   [MH] call=DK0MAV-12 2026.11.23 18:28:52 typ=TXT hw=HELTEC_V3 mod=8/8
+#        rssi=-79dBm snr=11dB dist=4.7km ncnt=2 age=1min hm=7dB role=R ex=0
+#        nb=2 gw=Y lat=N52.311 lon=E010.213 alt=103m
+# Header line is "[MH] window=720min rows=N" (no call= -> naturally skipped).
+# Older firmware answers with an ASCII table or an error: parse simply yields
+# [] and the table shows only what our own ever-state already knows.
+MH_LINE_RE = re.compile(r"^\[MH\]\s+call=(\S+)(.*)$", re.M)
+MH_AGE_RE = re.compile(r"\bage=(\d+)(s|min|h)\b")
+MH_SNR_RE = re.compile(r"\bsnr=(-?\d+(?:\.\d+)?)dB\b")
+
+
+def parse_meshcom_mheard(text):
+    rows = []
+    for m in MH_LINE_RE.finditer(text or ""):
+        call, rest = m.group(1).strip().upper(), m.group(2)
+        ms = MH_SNR_RE.search(rest)
+        if not ms:
+            continue
+        ma = MH_AGE_RE.search(rest)
+        age_s = 0
+        if ma:
+            age_s = int(ma.group(1)) * {"s": 1, "min": 60, "h": 3600}[ma.group(2)]
+        rows.append({"call": call, "age_s": age_s, "snr_db": float(ms.group(1)),
+                     "gw": "Y" if re.search(r"\bgw=Y\b", rest) else "N"})
+    return rows
 
 
 def read_response(ser, timeout_s=4.0):
@@ -475,7 +559,8 @@ def probe_port(port, serial_mod, now_utc=None, manual=None):
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
     res = dict(usb_os_info(port))
-    res.update({"port": port, "role": "unknown", "ok": False, "rows": [], "details": "-"})
+    res.update({"port": port, "role": "unknown", "ok": False, "rows": [],
+                "mh_rows": [], "details": "-"})
 
     lock_fd = os.open(lock_file_for(port), os.O_CREAT | os.O_RDWR, 0o644)
     try:
@@ -597,6 +682,10 @@ def probe_port(port, serial_mod, now_utc=None, manual=None):
                     elif want_epoch is not None:
                         log(f"manual sync on {port}: cannot read --pos clock, "
                             "--settime skipped")
+
+                # F32: heard-stations list for the MeshCom Neighbors table
+                # (12 h device window; we keep our own all-time state).
+                res["mh_rows"] = parse_meshcom_mheard(send_cmd(ser, "--mheard", 8.0))
             else:
                 res["details"] = "- (unrecognized reply)"
     except Exception as e:                   # USB glitch / device vanished mid-probe
@@ -1713,6 +1802,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <h3>MeshCore Neighbors</h3>
 {table}
 {keymap_bar}
+{meshcom_table}
 {extra_sections}
 <footer>every node ever heard, merged with this run&apos;s live SNR &middot; source: repeater CLI
 <code>neighbors</code> over {src_port} &middot; updated every minute by cron</footer>
@@ -1806,7 +1896,9 @@ SORT_JS = """(function () {
             // Initial state: the merged nodes table opens sorted by "Last seen"
             // (column 2, age ascending = freshest first, matching the server
             // row order); every other table starts with its first column asc.
-            var init = (t.id === 'tbl-nodes' && ths.length > 2) ? 2 : 0;
+            // F32: the MeshCom table opens by "Last heard" (column 1) too.
+            var init = (t.id === 'tbl-nodes' && ths.length > 2) ? 2
+                     : (t.id === 'tbl-meshcom' && ths.length > 1) ? 1 : 0;
             activate(ths[init], init, 'asc');
         }
     });
@@ -1913,6 +2005,62 @@ def keymap_bar_html():
             '/*__KEYMAPJS__*/')
 
 
+def snr_cell_html(db):
+    """One live-SNR cell: F30 stairs + dB number (shared by both tables)."""
+    color = "#7f7" if db >= -6 else ("#fd5" if db >= -18 else "#f95")
+    lvl = snr_level(db)                              # F30: signal stairs
+    stair = ('<span class="sig">'
+             + (f'<span style="color:{color}">{BAR_CHARS[:lvl]}</span>' if lvl else "")
+             + f'<span class="sig-off">{BAR_CHARS[lvl:]}</span></span>')
+    return (f'<td class="num" style="color:{color}" data-sort="{db:.2f}">'
+            f'{stair} {db:+.2f}</td>')
+
+
+def build_meshcom_table(state, fresh_db, now_utc):
+    """F32: sortable all-stations-ever table for the MeshCom (433) side.
+
+    Same shape as the MeshCore table: station callsign (GW badge when the
+    device saw it answering as gateway), last seen, live SNR from this
+    run's --mheard reply (stairs), historical best/worst, sightings.
+    Newest first — and unlike the device's own list (12 h window) our
+    state keeps every station ever heard.
+    """
+    items = []
+    for key, e in (state or {}).items():
+        try:
+            last_ts = datetime.strptime(e["last"], "%Y-%m-%d %H:%M:%S UTC").replace(
+                tzinfo=timezone.utc)
+        except (KeyError, ValueError):
+            continue
+        items.append((key, e, last_ts))
+    items.sort(key=lambda t: (t[2], t[0]), reverse=True)
+    if not items:
+        return '<div class="none">no MeshCom stations recorded yet (-none-)</div>'
+    trs = []
+    for i, (key, e, last_ts) in enumerate(items):
+        age = max(0, int(now_utc.timestamp() - last_ts.timestamp()))
+        seen_iso = last_ts.strftime("%Y-%m-%d %H:%M:%S UTC")
+        best = float(e.get("best_db", 0.0))
+        worst = float(e.get("worst_db", 0.0))
+        sights = int(e.get("sightings", 0))
+        badge = '<span class="ext">GW</span>' if e.get("gw") == "Y" else ""
+        db = (fresh_db or {}).get(key)
+        snr_cell = snr_cell_html(db) if db is not None else '<td class="num">-</td>'
+        trs.append(
+            f'<tr data-order="{i}">'
+            f'<td data-sort="{key.lower()}">{htmllib.escape(key)}{badge}</td>'
+            f'<td class="num" title="{seen_iso}" data-sort="{age}">{humanize_secs(age)}</td>'
+            f'{snr_cell}'
+            f'<td class="num" style="color:#7f7" data-sort="{best:.2f}">{best:+.2f}</td>'
+            f'<td class="num" style="color:#f95" data-sort="{worst:.2f}">{worst:+.2f}</td>'
+            f'<td class="num" data-sort="{sights}">{sights}</td></tr>')
+    return ('<table class="sortable" id="tbl-meshcom"><thead><tr>'
+            '<th>Station</th>'
+            '<th class="num">Last heard</th><th class="num">SNR (dB)</th>'
+            '<th class="num">Best SNR (dB)</th><th class="num">Worst SNR (dB)</th>'
+            f'<th class="num">Sightings</th></tr></thead><tbody>{"".join(trs)}</tbody></table>')
+
+
 def build_merged_table(rows, state, now_utc):
     """One sortable table for every node ever heard; this run's rows add the live SNR.
 
@@ -1970,11 +2118,19 @@ def build_merged_table(rows, state, now_utc):
 
 def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp=None,
                ups=None, wd_devices=None, storages=None, temps=None, temps_ever=None,
-               nets=None):
+               nets=None, meshcom_ever=None, meshcom_fresh=None):
     if nodes_ever is not None:
         table = build_merged_table(rows, nodes_ever, now_utc)
     else:
         table = '<div class="none">no neighbors yet (-none-)</div>'
+    # F32: MeshCom side table right below the MeshCore one (user: both networks
+    # worth watching; order is ours to pick). meshcom_ever None = no MeshCom
+    # port probed at all (then the section would be noise) — show only when we
+    # actually talk to a MeshCom device.
+    meshcom_html = ""
+    if meshcom_ever is not None:
+        meshcom_html = ("<h3>MeshCom Neighbors</h3>\n"
+                        + build_meshcom_table(meshcom_ever, meshcom_fresh, now_utc))
 
     sections = []
     if usb_infos is not None:
@@ -2024,6 +2180,7 @@ def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp
         node=NODE_NAME, freq=MESHCORE_FREQ,
         meshcom_name=htmllib.escape(MESHCOM_NAME), meshcom_freq=MESHCOM_FREQ,
         table=table, keymap_bar=keymap_bar_html(),
+        meshcom_table=meshcom_html,
         extra_sections=extra, src_port=src_port)
     page = page.replace("/*__SORTJS__*/", SORT_JS)
     page = page.replace("/*__KEYMAPJS__*/", KEYMAP_JS)
@@ -2062,6 +2219,16 @@ def main():
     manual = load_manual_sync_request()
     infos = [probe_port(p, pyserial, now_utc, manual=manual) for p in ports]
     ensure_state_dir()
+
+    # F32: fold this run's MeshCom --mheard rows into the all-stations-ever
+    # state; fresh_db feeds the live-SNR column of the MeshCom table.
+    mh_rows = [r for info in infos for r in info.get("mh_rows", [])]
+    if any(info.get("role") == "meshcom" for info in infos):
+        meshcom_ever = update_meshcom_ever(mh_rows, now_utc)
+    else:
+        meshcom_ever = None
+    meshcom_fresh = {str(r.get("call", "")).upper(): r.get("snr_db")
+                     for r in mh_rows if r.get("call")}
 
     # F7: merge live classification with the persisted mapping (ports.json).
     # Unresponsive ports fall back to their saved role and get flagged stale;
@@ -2104,7 +2271,8 @@ def main():
     nodes_ever = update_nodes_ever(rows, now_utc)
     write_html(rows, now_utc, nodes_ever, usb_infos=infos, src_port=src_port, ntp=ntp,
                ups=ups, wd_devices=wd_devices, storages=storages,
-               temps=temps, temps_ever=temps_ever, nets=nets)
+               temps=temps, temps_ever=temps_ever, nets=nets,
+               meshcom_ever=meshcom_ever, meshcom_fresh=meshcom_fresh)
     def _role_tag(p):
         return p["role"] + ("(stale)" if p.get("stale") else "")
     roles = ", ".join(f"{os.path.basename(p['port'])}={_role_tag(p)}" for p in infos)
@@ -2130,7 +2298,9 @@ def main():
         net_tag = "net none (iproute2 unreadable)"
     log(f"ok: {roles}; {len(entries)} raw entries -> {len(rows)} unique node(s); "
         f"{len(nodes_ever)} node(s) in all-nodes-ever state; wrote {HTML_OUT}; "
-        f"{piups_tag}; {wd_tag}; {temps_tag}; {net_tag}")
+        + (f"{len(meshcom_ever)} meshcom station(s) ever; "
+           if meshcom_ever is not None else "")
+        + f"{piups_tag}; {wd_tag}; {temps_tag}; {net_tag}")
     return 0 if core is not None else 1
 
 

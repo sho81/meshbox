@@ -1,4 +1,4 @@
-# Feature history (F1–F31)
+# Feature history (F1–F32)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -349,3 +349,24 @@ link templates incl. overlay off/custom, name-cell markup with escaping,
 lookup-label states, table integration, helper status-only CLI, streaming
 gzip parse against a local fixture). `test-services.py` t10 covers the
 route: spawn, 409 single-flight, 429 cooldown, SKIPPED status write.
+
+## F32 · MeshCom Neighbors table — 2026-11-23
+
+A second neighbors table for the MeshCom (433 cm) side, right below the
+MeshCore one: Station · Last heard · live SNR (stairs) · Best/Worst SNR ·
+Sightings, sortable, newest first, `GW` badge for stations that answered
+as gateway. Source is the MeshCom console command `--mheard` (firmware
+4.40a answers `[MH] call=... snr=... age=... gw=Y` key=value lines; older
+firmware yields an empty table instead of failing). The device only keeps
+a 12 h window and forgets on reboot, so the engine mirrors its own
+all-stations-ever state in `meshcom-nodes-ever.json` (first/last heard,
+sighting count without double-counting the same heard event, best/worst
+SNR) — same pattern as nodes-ever.json on the MeshCore side. The live SNR
+column comes from this run's reply; stations older than that show "-".
+Note: `--mheard` lists directly RF-heard stations only — mesh-relayed
+traffic does not appear.
+
+Regression suite: `test-f32.py` (18 checks: --mheard parsing incl. units
+and garbage, ever-state merge/dedup/gw stickiness, table markup and
+ordering, section gating, sort init). `test-f21.py`/`test-f28.py` adapted
+to the new template slot and sort init.

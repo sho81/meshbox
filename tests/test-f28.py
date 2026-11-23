@@ -60,7 +60,9 @@ check("t1 order is freshest-first: BBBB0002 fresh, AAAA0001 oldest",
       "BBBB0002" in first and "AAAA0001" in last, first[:120])
 check("t2 SORT_JS picks Last seen (idx 2) for tbl-nodes, col 0 elsewhere",
       "t.id === 'tbl-nodes' && ths.length > 2" in mn.SORT_JS
-      and "var init = (t.id === 'tbl-nodes' && ths.length > 2) ? 2 : 0;" in mn.SORT_JS
+      and "var init = (t.id === 'tbl-nodes' && ths.length > 2) ? 2\n"
+          "                     : (t.id === 'tbl-meshcom' && ths.length > 1) ? 1 : 0;"
+      in mn.SORT_JS
       and "activate(ths[init], init, 'asc');" in mn.SORT_JS, mn.SORT_JS[-300:])
 check("t3 Last seen stays column index 2 of the nodes table",
       table.find(">Last seen<") > table.find(">Node<")

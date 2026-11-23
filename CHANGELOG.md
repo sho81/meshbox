@@ -28,6 +28,10 @@ engine comments and test file names.
   streamed), dashboard button + `/keymap-update` service route (single-flight,
   15 min cooldown) + "Last node lookup" status label; optional `node_link_url`;
   new `tests/test-f31.py`
+- F32: **MeshCom Neighbors table** — second sortable table fed by the MeshCom
+  console `--mheard` (433 side): station, last heard, live SNR with stairs,
+  best/worst, sightings, GW badge; all-stations-ever state in
+  `meshcom-nodes-ever.json` (the device only keeps 12 h); new `tests/test-f32.py`
 
 ## 2026-11-21
 
