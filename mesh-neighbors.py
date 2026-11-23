@@ -108,7 +108,9 @@ HTML_OUT = os.path.join(WWW_DIR, "neighbors.html")
 #     "node_name": "...", "meshcore_freq": "...",
 #     "meshcom_name": "...", "meshcom_freq": "...",
 #     "ports_glob": "/dev/ttyACM*",
-#     "www_dir": "/var/www/mesh" }
+#     "www_dir": "/var/www/mesh",
+#     "node_names": { "AABB0011": "Some Node", ... } }   (F29: manual key ->
+#         display-name map, merged over mesh-node-names.json; config wins)
 BOX_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                "box-config.json")
 
@@ -219,14 +221,22 @@ def humanize_secs(s):
     return f"{s // 86400} d {(s % 86400) // 3600:02d} h"
 
 
+# F29: manual key-prefix -> display-name resolution may also live inside
+# box-config.json ("node_names" dict); those entries are merged OVER the
+# mesh-node-names.json map (config wins on conflicts, file stays optional).
+_BOX_NAMES = _BOX.get("node_names") if isinstance(_BOX.get("node_names"), dict) else {}
+
+
 def load_names():
+    names = {}
     try:
         with open(NAMES_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return {str(k).upper(): str(v) for k, v in data.items()}
+        names = {str(k).upper(): str(v) for k, v in data.items()}
     except (OSError, ValueError) as e:
         log(f"warning: no valid name map at {NAMES_FILE} ({e})")
-        return {}
+    names.update({str(k).upper(): str(v) for k, v in _BOX_NAMES.items()})
+    return names
 
 
 def load_nodes_ever():

@@ -6,5 +6,6 @@
   "meshcom_name": "EXAMPLE-12 Example Unit",
   "meshcom_freq": "433.175 MHz",
   "ports_glob": "/dev/ttyACM*",
-  "www_dir": "/var/www/mesh"
+  "www_dir": "/var/www/mesh",
+  "node_names": { "AABBCCDD": "Example Node Name" }
 }

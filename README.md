@@ -26,12 +26,12 @@ of paths you can adapt.
 All tables are sortable (third click restores device order) and pre-sorted with visible
 sort indicators — the nodes table opens sorted by Last seen (freshest first). Timestamps
 tick live in the browser. The features carry stable internal
-change IDs (F1–F28) which also appear in engine comments and test file names — decoded
+change IDs (F1–F29) which also appear in engine comments and test file names — decoded
 in [FEATURES.md](FEATURES.md).
 
 One engine file can serve several boxes (F27): an optional `box-config.json`
 next to the script overrides page title, station identity, serial port family
-(e.g. `/dev/ttyACM*`) and output dir — see [deploy/second-box/](deploy/second-box/).
+(e.g. `/dev/ttyACM*`) and output dir — see [deploy/README.md](deploy/README.md).
 Branding/identity values are deployment-private and live only on each box.
 
 ## Layout
@@ -68,7 +68,9 @@ machine in `/var/lib/meshcore/*.json` (atomic writes). The rendered page is writ
 1. Python venv with `meshcore-cli` (provides `meshcli` + `pyserial`): see `requirements.txt`.
 2. Adapt the constants near the top of `mesh-neighbors.py` (node name, frequency,
    paths) and drop a `mesh-node-names.json` next to the engine
-   (start from `deploy/mesh-node-names.example.json`).
+   (start from `deploy/mesh-node-names.example.json`). For filling it with
+   display names from public data see the name-resolution how-to in
+   [`deploy/README.md`](deploy/README.md#name-resolution--privacy).
 3. Install the pieces from `deploy/`: cron line, systemd units (time-sync service,
    log relay), nginx `location = /settime` proxy, tmpfiles/logrotate for the UPS log.
 4. Make sure the output file exists and is writable by the cron user; the engine
@@ -100,6 +102,7 @@ python3 tests/test-f25.py mesh-neighbors.py
 python3 tests/test-f26.py mesh-neighbors.py
 python3 tests/test-f27.py mesh-neighbors.py
 python3 tests/test-f28.py mesh-neighbors.py
+python3 tests/test-f29.py mesh-neighbors.py
 ```
 
 All suites run on every push via GitHub Actions (`.github/workflows/test.yml`).

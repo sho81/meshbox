@@ -1,4 +1,4 @@
-# Feature history (F1–F28)
+# Feature history (F1–F29)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -274,7 +274,7 @@ page stays byte-identical.
 - Config files are inserted verbatim into `<title>`/`<h2>` — authors keep
   them HTML-safe. Broken JSON or wrong shapes are ignored with a warning.
 - Identity/branding values are deployment-private: they live on each box;
-  the repo ships only placeholder examples in `deploy/second-box/`.
+  the repo ships only placeholder examples in `deploy/` (see `deploy/README.md`).
 
 Regression suite: `test-f27.py` (11 checks: defaults preserved, full/partial
 overlay, broken config, ttyACM targets both sides, rendered page overlay).
@@ -289,3 +289,16 @@ order, and "device order" now *is* freshest-first too). Every other table
 keeps its first-column initial sort.
 
 Regression suite: `test-f28.py` (3 checks).
+
+## F29 · Manual node names inside the box config — 2026-11-23
+
+Manual key-prefix → display-name resolution (until then only
+`mesh-node-names.json` next to the script) is now also an **optional part of
+`box-config.json`**: a `node_names` object maps 8-hex key prefixes to names.
+The two maps are merged at load time, config entries winning over file
+entries; either one alone works. Keys are normalized upper-case, malformed
+shapes are ignored. Useful because many node names are public data (e.g.
+from map.meshcore.io) while your local overrides stay on the box.
+
+Regression suite: `test-f29.py` (8 checks: defaults, config-only, merge
+precedence, key normalization, broken shapes, no F27 regression).

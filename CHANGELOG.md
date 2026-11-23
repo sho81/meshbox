@@ -10,10 +10,15 @@ engine comments and test file names.
   engine overrides title, station identity strings, `ports_glob` (ttyACM
   serial family works end-to-end now, incl. F24 settime targets) and
   `www_dir`; defaults unchanged, so the first box needs no file and its
-  page stays byte-identical. `deploy/second-box/` documents a config-only
+  page stays byte-identical. `deploy/README.md` documents a config-only
   re-brand deployment; new `tests/test-f27.py`
 - F28: **nodes table initial sort = Last seen** (freshest first, indicator
   arrow included); other tables keep their initial sort; new `tests/test-f28.py`
+- F29: **node_names inside box-config.json** — manual key-prefix → name map
+  merged over mesh-node-names.json (config wins; file optional); new
+  `tests/test-f29.py`. Name-resolution how-to (public map.meshcore.io API)
+  documented in `deploy/README.md`; example name map switched to
+  fictitious key prefixes (privacy)
 
 ## 2026-11-21
 
