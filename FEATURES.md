@@ -1,4 +1,4 @@
-# Feature history (F1–F29)
+# Feature history (F1–F30)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -302,3 +302,20 @@ from map.meshcore.io) while your local overrides stay on the box.
 
 Regression suite: `test-f29.py` (8 checks: defaults, config-only, merge
 precedence, key normalization, broken shapes, no F27 regression).
+
+## F30 · Signal stairs in the live SNR column — 2026-11-23
+
+Every live SNR reading now carries an 8-step **signal staircase** next to
+the dB number: the full set of Unicode block glyphs `▁▂▃▄▅▆▇█`
+(U+2581–U+2588) stands ascending in the cell; steps reached by the signal
+are colored (same green/yellow/red bands as before), the remaining steps
+are dim gray. Scale: −20 dB (roughly the SF12 decode floor) to +8 dB
+(saturated link), 7 equal 4 dB steps, so full stairs at ≥ +8 dB and no
+lit step below −20. The scale is box-overridable via optional
+`bar_min`/`bar_max` numbers in `box-config.json`. The dB number, the
+sort values and the Best/Worst history columns are untouched; rows
+without a live value still show a plain "-".
+
+Regression suite: `test-f30.py` (8 checks: glyph set, level mapping at
+every boundary, overlay scale, bogus shapes, cell markup, untouched
+best/worst).

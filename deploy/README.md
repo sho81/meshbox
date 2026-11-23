@@ -8,7 +8,7 @@ files **next to the script on the box**, none of it in git:
 
 | File (on the box, next to the engine) | Purpose |
 | --- | --- |
-| `box-config.json` | page title, station header, the four identity strings, serial family (`ports_glob`), output dir, and optional `node_names` (key prefix -> display name, merged over the name file below). See `box-config.example.json` — every key optional, absent = engine defaults |
+| `box-config.json` | page title, station header, the four identity strings, serial family (`ports_glob`), output dir, SNR-stairs scale (`bar_min`/`bar_max`, defaults −20/+8 dB), and optional `node_names` (key prefix -> display name, merged over the name file below). See `box-config.example.json` — every key optional, absent = engine defaults |
 | `mesh-node-names.json` | node id -> display name map (shape: `mesh-node-names.example.json`); optional when all names live in `box-config.json` |
 
 ## Checklist for a new box

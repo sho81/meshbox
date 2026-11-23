@@ -109,6 +109,7 @@ HTML_OUT = os.path.join(WWW_DIR, "neighbors.html")
 #     "meshcom_name": "...", "meshcom_freq": "...",
 #     "ports_glob": "/dev/ttyACM*",
 #     "www_dir": "/var/www/mesh",
+#     "bar_min": -20.0, "bar_max": 8.0,   (F30: SNR bar scale, see snr_bar)
 #     "node_names": { "AABB0011": "Some Node", ... } }   (F29: manual key ->
 #         display-name map, merged over mesh-node-names.json; config wins)
 BOX_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -151,6 +152,11 @@ STATION = _BOX.get("station") if isinstance(_BOX.get("station"), str) \
 # sysfs tty glob for the USB tables/watchdog follows the serial family the
 # box actually uses (/dev/ttyACM* -> /sys/class/tty/ttyACM*).
 TTY_SYS_GLOB = "/sys/class/tty/" + os.path.basename(PORTS_GLOB)
+# F30: SNR bar scale (dB). Optional overlay keys bar_min/bar_max (numbers);
+# defaults span the decodable-to-saturated window of these MeshCore QRGs.
+_BAR_MIN, _BAR_MAX = _BOX.get("bar_min"), _BOX.get("bar_max")
+BAR_MIN = float(_BAR_MIN) if isinstance(_BAR_MIN, (int, float)) else -20.0
+BAR_MAX = float(_BAR_MAX) if isinstance(_BAR_MAX, (int, float)) else 8.0
 
 
 def lock_file_for(port):
@@ -1652,6 +1658,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
              font-family:'Courier New',monospace; font-size:11px; padding:2px 8px; cursor:pointer; }}
     .tbtn:hover {{ background:#7f7; color:#000; }}
     .tresult {{ color:#575; font-size:11px; margin-left:6px; }}
+    /* F30: signal stairs (▁..█) in the live SNR cell; dim steps = not reached */
+    .sig {{ display:inline-block; font-size:12px; line-height:1; letter-spacing:-1px;
+            vertical-align:middle; white-space:nowrap; }}
+    .sig .sig-off {{ color:#3c3c3c; }}
 </style>
 </head>
 <body>
@@ -1759,6 +1769,23 @@ SORT_JS = """(function () {
 })();"""
 
 
+BAR_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"  # ▁▂▃▄▅▆▇█
+
+
+def snr_level(db):
+    """F30: signal-stairs level 0..8 for an SNR dB value.
+
+    Scale BAR_MIN..BAR_MAX (defaults -20..+8 dB = the SF12 decode floor up
+    to a saturated link): BAR_MIN reaches the first step, each further step
+    is a quarter of the remaining scale; BAR_MAX and above = 8 (full).
+    Below BAR_MIN: 0 (stairs fully dim).
+    """
+    if db < BAR_MIN:
+        return 0
+    idx = int(7.0 * (db - BAR_MIN) / (BAR_MAX - BAR_MIN))
+    return max(0, min(idx + 1, 8))
+
+
 def build_merged_table(rows, state, now_utc):
     """One sortable table for every node ever heard; this run's rows add the live SNR.
 
@@ -1789,8 +1816,12 @@ def build_merged_table(rows, state, now_utc):
         db = fresh_db.get(key)
         if db is not None:
             color = "#7f7" if db >= -6 else ("#fd5" if db >= -18 else "#f95")
-            snr_cell = (f'<td class="num" style="color:{color}" '
-                        f'data-sort="{db:.2f}">{db:+.2f}</td>')
+            lvl = snr_level(db)                      # F30: signal stairs
+            stair = ('<span class="sig">'
+                     + (f'<span style="color:{color}">{BAR_CHARS[:lvl]}</span>' if lvl else "")
+                     + f'<span class="sig-off">{BAR_CHARS[lvl:]}</span></span>')
+            snr_cell = (f'<td class="num" style="color:{color}" data-sort="{db:.2f}">'
+                        f'{stair} {db:+.2f}</td>')
         else:                                     # not heard this run -> no live value
             snr_cell = '<td class="num">-</td>'
         trs.append(

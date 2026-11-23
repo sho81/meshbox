@@ -19,6 +19,9 @@ engine comments and test file names.
   `tests/test-f29.py`. Name-resolution how-to (public map.meshcore.io API)
   documented in `deploy/README.md`; example name map switched to
   fictitious key prefixes (privacy)
+- F30: **signal stairs** — 8-step Unicode staircase (▁..█) visualizes each
+  live SNR (scale −20..+8 dB, per-box `bar_min`/`bar_max`), dB number and
+  Best/Worst columns untouched; new `tests/test-f30.py`
 
 ## 2026-11-21
 

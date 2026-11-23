@@ -7,5 +7,7 @@
   "meshcom_freq": "433.175 MHz",
   "ports_glob": "/dev/ttyACM*",
   "www_dir": "/var/www/mesh",
+  "bar_min": -20.0,
+  "bar_max": 8.0,
   "node_names": { "AABBCCDD": "Example Node Name" }
 }
