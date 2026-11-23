@@ -1,4 +1,4 @@
-# Feature history (F1–F30)
+# Feature history (F1–F31)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -319,3 +319,33 @@ without a live value still show a plain "-".
 Regression suite: `test-f30.py` (8 checks: glyph set, level mapping at
 every boundary, overlay scale, bogus shapes, cell markup, untouched
 best/worst).
+
+## F31 · Node names deep-link to map.meshcore.io — 2026-11-23
+
+Node names are links to the official MeshCore map
+(`https://map.meshcore.io/?public_key=<full key>`, new tab) — but only for
+nodes whose FULL 64-hex public key is known locally. The dashboard engine
+only sees 8-hex key prefixes, and the map's API has no prefix query (its
+frontend opens popups for full keys only), so a local key map
+`/var/lib/meshcore/mesh-keys.json` (prefix → full key) does the join.
+Nodes never published on the map keep their names as plain text — their
+identifiers are never invented or sent anywhere.
+
+`mesh-keymap.py` (new companion script) refreshes that map: it streams the
+map's public node list (no partial query exists, so it is the full list —
+~19 MB gzipped), keeps only prefixes seen in nodes-ever.json and writes
+`mesh-keys.json` plus `keymap-status.json` (last run: OK / SKIPPED / FAIL +
+detail incl. transfer and file size). Triggers: the dashboard button
+"⟳ Update node lookup data" (confirm dialog warns about the 19 MB; the
+time-sync service gained a `POST /keymap-update` route with single-flight
+and a 15-minute cooldown — refusals also land in the status file) or a
+manual `mesh-keymap.py` run. Below the neighbors table the page shows
+"Last node lookup: <UTC> — OK (73815 nodes scanned, 8 keys stored,
+19.1 MB transfer, file 0.6 KB)". Optional box-config key `node_link_url`
+customizes the link template (""/false = links off).
+
+Regression suite: `test-f31.py` (17 checks: key-map loading/normalization,
+link templates incl. overlay off/custom, name-cell markup with escaping,
+lookup-label states, table integration, helper status-only CLI, streaming
+gzip parse against a local fixture). `test-services.py` t10 covers the
+route: spawn, 409 single-flight, 429 cooldown, SKIPPED status write.

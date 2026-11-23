@@ -169,6 +169,13 @@ def lock_file_for(port):
 NAMES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mesh-node-names.json")
 STATE_DIR = "/var/lib/meshcore"
 NODES_EVER_FILE = os.path.join(STATE_DIR, "nodes-ever.json")
+# F31: prefix(8 hex) -> full 64-hex public key, refreshed on demand from the
+# public map.meshcore.io database (mesh-keymap.py); box-local, no secrets —
+# every key in it is already public on the map.
+KEY_MAP_FILE = os.path.join(STATE_DIR, "mesh-keys.json")
+# F31: outcome of the last key lookup run, written by mesh-keymap.py (and by
+# the time-sync service when it refuses a too-early refresh).
+KEYMAP_STATUS_FILE = os.path.join(STATE_DIR, "keymap-status.json")
 PORTS_FILE = os.path.join(STATE_DIR, "ports.json")
 USB_STATE_FILE = os.path.join(STATE_DIR, "usb-state.json")
 TEMPS_STATE_FILE = os.path.join(STATE_DIR, "temps-ever.json")
@@ -243,6 +250,37 @@ def load_names():
         log(f"warning: no valid name map at {NAMES_FILE} ({e})")
     names.update({str(k).upper(): str(v) for k, v in _BOX_NAMES.items()})
     return names
+
+
+def load_key_map(path):
+    # F31: prefix(8 hex) -> full public key map (mesh-keymap.py output);
+    # {} when missing or broken — links are an enhancement, never a hard dep.
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {str(k).upper(): str(v).lower()
+                    for k, v in data.items() if str(k) and str(v)}
+    except (OSError, ValueError) as e:
+        log(f"warning: no valid key map at {path} ({e})")
+    return {}
+
+
+def node_link_url(key, full):
+    # F31: deep link for a node whose FULL public key is known. The map
+    # frontend only opens a node popup for a full 64-hex ?public_key= (prefix
+    # queries are ignored by its API), so nodes without a known key get no
+    # link at all. Optional box-config key node_link_url: "" / false = links
+    # off, {key} is the template placeholder, absent = the map default.
+    url = _BOX.get("node_link_url", "https://map.meshcore.io/?public_key={key}")
+    if url is False or url == "":
+        return ""
+    if not isinstance(url, str):
+        url = "https://map.meshcore.io/?public_key={key}"
+    return url.replace("{key}", full)
+
+
+KEY_MAP = load_key_map(KEY_MAP_FILE)
 
 
 def load_nodes_ever():
@@ -1662,6 +1700,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     .sig {{ display:inline-block; font-size:12px; line-height:1; letter-spacing:-1px;
             vertical-align:middle; white-space:nowrap; }}
     .sig .sig-off {{ color:#3c3c3c; }}
+    /* F31: external map link on node names (only when the full key is known) */
+    table.sortable a {{ color:inherit; text-decoration:none;
+                        border-bottom:1px dotted #585; }}
+    table.sortable a:hover {{ color:#cfc; border-bottom-color:#cfc; }}
+    .ext {{ font-size:10px; color:#8ab88a; margin-left:2px; }}
 </style>
 </head>
 <body>
@@ -1669,6 +1712,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 {sublines}
 <h3>MeshCore Neighbors</h3>
 {table}
+{keymap_bar}
 {extra_sections}
 <footer>every node ever heard, merged with this run&apos;s live SNR &middot; source: repeater CLI
 <code>neighbors</code> over {src_port} &middot; updated every minute by cron</footer>
@@ -1786,6 +1830,89 @@ def snr_level(db):
     return max(0, min(idx + 1, 8))
 
 
+def render_name_cell(key, name_e):
+    # F31: wrap an already-escaped name in a map.meshcore.io deep link when the
+    # full public key is known (see node_link_url); plain text otherwise. The
+    # small arrow marks the external link. data-sort stays the plain name.
+    full = KEY_MAP.get(key)
+    url = node_link_url(key, full) if full else ""
+    if url and url.lower().startswith(("http://", "https://")):
+        return (f'<td data-sort="{name_e.lower()}">'
+                f'<a href="{htmllib.escape(url, quote=True)}" target="_blank" '
+                f'rel="noopener" title="Show node on map.meshcore.io">'
+                f'{name_e}<span class="ext">\u2197</span></a></td>')
+    return f'<td data-sort="{name_e.lower()}">{name_e}</td>'
+
+
+def load_keymap_status():
+    # F31: last key-lookup outcome for the label below the table; None if none.
+    try:
+        with open(KEYMAP_STATUS_FILE, "r", encoding="utf-8") as f:
+            st = json.load(f)
+        if isinstance(st, dict):
+            return st
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+# F31: button + status label under the nodes table. The helper (mesh-keymap.py)
+# fetches the public map list (~19 MB gzipped — the confirm text warns about
+# exactly that); the service route enforces single-flight + cooldown. Result
+# of the LAST run (button or manual CLI) is read from keymap-status.json.
+KEYMAP_JS = """
+<script>
+(function () {
+    var btn = document.getElementById('keymap-btn');
+    if (!btn) return;
+    btn.onclick = function () {
+        var msg = document.getElementById('keymap-msg');
+        if (!confirm('Update node lookup data?\\n\\n'
+                     + 'This downloads the FULL public node list from\\n'
+                     + 'map.meshcore.io (~19 MB compressed, one request)\\n'
+                     + 'to refresh the external map links.')) return;
+        msg.textContent = 'started \\u2026';
+        btn.disabled = true;
+        fetch('/keymap-update', {method: 'POST'})
+          .then(function (r) {
+              return r.json()
+                     .then(function (d) { return [r.status, d]; },
+                           function () { return [0, {}]; });
+          })
+          .then(function (rd) {
+              var d = rd[1];
+              if (d.ok) msg.textContent = 'running \\u2014 label updates on the next page reload';
+              else if (d.skipped) msg.textContent = 'skipped: ' + (d.reason || 'cooldown');
+              else msg.textContent = 'error: ' + (d.error || 'unknown (HTTP ' + rd[0] + ')');
+              btn.disabled = false;
+          })
+          .catch(function (e) { msg.textContent = 'error: ' + e; btn.disabled = false; });
+    };
+})();
+</script>"""
+
+
+def keymap_bar_html():
+    km = load_keymap_status()
+    if km:
+        res = str(km.get("result", ""))
+        color = {"OK": "#7f7", "FAIL": "#f95"}.get(res, "#9a9")
+        txt = ('Last node lookup: ' + htmllib.escape(str(km.get("last_run", "?")))
+               + ' &mdash; <span style="color:' + color + '">'
+               + htmllib.escape(res) + '</span>')
+        if km.get("detail"):
+            txt += (' <span style="color:#9a9">('
+                    + htmllib.escape(str(km["detail"])) + ')</span>')
+    else:
+        txt = '<span style="color:#575">no node lookup data yet</span>'
+    return ('<div class="sub" style="margin:6px 0 2px">' + txt
+            + ' <button type="button" class="tbtn" id="keymap-btn"'
+            ' title="Fetch the public map.meshcore.io node list (~19 MB) and refresh the node key map">'
+            '&#8635; Update node lookup data</button>'
+            + ' <span class="tresult" id="keymap-msg"></span></div>\n'
+            '/*__KEYMAPJS__*/')
+
+
 def build_merged_table(rows, state, now_utc):
     """One sortable table for every node ever heard; this run's rows add the live SNR.
 
@@ -1808,6 +1935,7 @@ def build_merged_table(rows, state, now_utc):
     trs = []
     for i, (key, e, last_ts) in enumerate(items):
         name_e = htmllib.escape(names.get(key, "-"))
+        name_cell = render_name_cell(key, name_e)
         age = max(0, int(now_utc.timestamp() - last_ts.timestamp()))
         seen_iso = last_ts.strftime("%Y-%m-%d %H:%M:%S UTC")
         best = float(e.get("best_db", 0.0))
@@ -1827,7 +1955,7 @@ def build_merged_table(rows, state, now_utc):
         trs.append(
             f'<tr data-order="{i}">'
             f'<td class="key" data-sort="{key}">{key}</td>'
-            f'<td data-sort="{name_e.lower()}">{name_e}</td>'
+            f'{name_cell}'
             f'<td class="num" title="{seen_iso}" data-sort="{age}">{humanize_secs(age)}</td>'
             f'{snr_cell}'
             f'<td class="num" style="color:#7f7" data-sort="{best:.2f}">{best:+.2f}</td>'
@@ -1895,8 +2023,10 @@ def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp
         started_meta=started_meta, sublines=sublines,
         node=NODE_NAME, freq=MESHCORE_FREQ,
         meshcom_name=htmllib.escape(MESHCOM_NAME), meshcom_freq=MESHCOM_FREQ,
-        table=table, extra_sections=extra, src_port=src_port)
+        table=table, keymap_bar=keymap_bar_html(),
+        extra_sections=extra, src_port=src_port)
     page = page.replace("/*__SORTJS__*/", SORT_JS)
+    page = page.replace("/*__KEYMAPJS__*/", KEYMAP_JS)
     # F22: atomic publish — write a sibling .tmp then os.replace() so a browser
     # refreshing mid-write never sees a half-written page (same pattern as the
     # state files). Keep the mode of the existing target (installed 666 so the

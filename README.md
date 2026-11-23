@@ -14,7 +14,7 @@ of paths you can adapt.
 
 | Section | Content |
 |---|---|
-| **Neighbors** | merged table of every node ever heard: key prefix, name, last seen (d/h/m), live SNR (with an 8-step signal-stair glyph), best/worst SNR, sightings. All-nodes-ever history survives reboots via a small JSON state file |
+| **Neighbors** | merged table of every node ever heard: key prefix, name (deep-linked to the official MeshCore map when the full key is known), last seen (d/h/m), live SNR (with an 8-step signal-stair glyph), best/worst SNR, sightings. All-nodes-ever history survives reboots via a small JSON state file |
 | **USB serial devices** | every `/dev/ttyUSB*` probed and classified (MeshCore repeater vs. MeshCom) using OS info + one serial command per port; survives USB port swaps |
 | **USB device watchdog** | ONLINE/OFFLINE state machine for every tracked peripheral (serial bridges, storage sticks) driven purely from `/sys` enumeration — catches a stick that silently disappeared, even across reboots |
 | **Network interfaces** | one row per interface (lo omitted): link state, MAC and every IPv4/IPv6 address with scope labels (global/ULA/link) and dynamic-lease hints; default route tagged, Hamnet referrals as footer line — your "how do I connect here" table |
@@ -26,7 +26,7 @@ of paths you can adapt.
 All tables are sortable (third click restores device order) and pre-sorted with visible
 sort indicators — the nodes table opens sorted by Last seen (freshest first). Timestamps
 tick live in the browser. The features carry stable internal
-change IDs (F1–F30) which also appear in engine comments and test file names — decoded
+change IDs (F1–F31) which also appear in engine comments and test file names — decoded
 in [FEATURES.md](FEATURES.md).
 
 One engine file can serve several boxes (F27): an optional `box-config.json`
@@ -104,6 +104,7 @@ python3 tests/test-f27.py mesh-neighbors.py
 python3 tests/test-f28.py mesh-neighbors.py
 python3 tests/test-f29.py mesh-neighbors.py
 python3 tests/test-f30.py mesh-neighbors.py
+python3 tests/test-f31.py mesh-neighbors.py
 ```
 
 All suites run on every push via GitHub Actions (`.github/workflows/test.yml`).

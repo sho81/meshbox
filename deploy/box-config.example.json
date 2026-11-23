@@ -9,5 +9,6 @@
   "www_dir": "/var/www/mesh",
   "bar_min": -20.0,
   "bar_max": 8.0,
+  "node_link_url": "https://map.meshcore.io/?public_key={key}",
   "node_names": { "AABBCCDD": "Example Node Name" }
 }

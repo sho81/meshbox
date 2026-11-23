@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 # SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: MIT
 """mesh-time-sync — manual time sync for raspi-mesh (F13, F24).
 
 A tiny HTTP service bound to loopback only. nginx proxies /settime to it, so
@@ -8,6 +9,13 @@ the visitor's browser clock when NTP is unavailable.
 
 Endpoints:
     GET  /           -> {"ok": true, "now_utc": "..."}          (health check)
+    POST /keymap-update  (F31)  -> {"ok": true, "started": true}
+                      Runs mesh-keymap.py (full public map.meshcore.io node
+                      list -> mesh-keys.json) as a detached subprocess and
+                      returns right away. Single-flight + 15 min cooldown (the
+                      download is ~19 MB gzipped); refusals answer
+                      {"ok": false, "skipped": true, "reason": "..."} and are
+                      logged to keymap-status.json for the dashboard label.
     POST /settime    body: {"epoch": <seconds since 1970>}      (sets system time)
                       -> {"ok": true, "applied_epoch": N, "delta_s": D, "now_utc": "..."}
     POST /settime    body: {"epoch": ..., "target": "/dev/ttyUSBx|/dev/ttyACMx"}   (F24)
@@ -31,7 +39,10 @@ system python3 and has no venv dependency. Logs to stderr -> journal:
 import json
 import os
 import re
+import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -45,6 +56,15 @@ MAX_DELTA_S = 5 * 366 * 86400  # 5 years
 # F24: request marker consumed by mesh-neighbors.py (must match its CONFIG).
 REQUEST_FILE = "/var/lib/meshcore/settime-request.json"
 TARGET_RE = re.compile(r"^/dev/tty(?:USB|ACM)\d+$")
+
+# F31: node key map refresh (see mesh-keymap.py). STATE_DIR is the engine's
+# state dir; the helper writes mesh-keys.json + keymap-status.json there.
+STATE_DIR = "/var/lib/meshcore"
+KEYMAP_SCRIPT = "/usr/local/bin/mesh-keymap.py"
+KEYMAP_STAMP = "/var/lib/meshcore/.keymap-last"    # mtime = last accepted run
+KEYMAP_MIN_GAP_S = 15 * 60                         # not a click-happy endpoint
+KEYMAP_RUN = {"proc": None}                        # single-flight guard
+KEYMAP_LOCK = threading.Lock()
 
 
 def queue_serial_request(target, epoch_s, now_dt):
@@ -109,7 +129,49 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._json(404, {"ok": False, "error": "not found"})
 
+    def handle_keymap(self):
+        # F31: dashboard "Update node lookup data" button. Refuse while a run
+        # is still going, and before KEYMAP_MIN_GAP_S after the last accepted
+        # click (the full public map dump is ~19 MB gzipped). Refusals also
+        # land in keymap-status.json so the label shows the last ATTEMPT.
+        with KEYMAP_LOCK:
+            proc = KEYMAP_RUN["proc"]
+            if proc is not None and proc.poll() is None:
+                return self._json(409, {"ok": False, "skipped": True,
+                                        "reason": "update already running"})
+            try:
+                last = os.path.getmtime(KEYMAP_STAMP)
+            except OSError:
+                last = 0.0
+            gap = time.time() - last
+            if gap < KEYMAP_MIN_GAP_S:
+                why = ("last run %d s ago (min %d min)"
+                       % (int(gap), KEYMAP_MIN_GAP_S // 60))
+                sys.stderr.write("keymap: skipped (%s)\n" % why)
+                self._keymap_status("SKIPPED", why)
+                return self._json(429, {"ok": False, "skipped": True,
+                                        "reason": why})
+            try:
+                open(KEYMAP_STAMP, "a").close()
+                KEYMAP_RUN["proc"] = subprocess.Popen(
+                    [sys.executable, KEYMAP_SCRIPT, "--state-dir", STATE_DIR])
+            except OSError as e:
+                return self._json(500, {"ok": False,
+                                        "error": "keymap spawn failed: %s" % e})
+        sys.stderr.write("keymap: update started (%s)\n" % KEYMAP_SCRIPT)
+        self._json(200, {"ok": True, "started": True})
+
+    def _keymap_status(self, result, detail):
+        try:
+            subprocess.run([sys.executable, KEYMAP_SCRIPT, "--state-dir", STATE_DIR,
+                            "--status-only", result, "--detail", detail],
+                           timeout=10)
+        except (OSError, subprocess.SubprocessError) as e:
+            sys.stderr.write("keymap: status write failed: %s\n" % e)
+
     def do_POST(self):
+        if self.path == "/keymap-update":
+            return self.handle_keymap()
         if self.path != "/settime":
             return self._json(404, {"ok": False, "error": "not found"})
         try:

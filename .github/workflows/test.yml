@@ -46,3 +46,5 @@ jobs:
         run: python3 tests/test-f29.py mesh-neighbors.py
       - name: test-f30
         run: python3 tests/test-f30.py mesh-neighbors.py
+      - name: test-f31
+        run: python3 tests/test-f31.py mesh-neighbors.py

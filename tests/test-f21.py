@@ -48,7 +48,7 @@ page = eng.HTML_TEMPLATE.format(
     title=eng.PAGE_TITLE, station=eng.STATION,
     started_meta="", sublines="", node=eng.NODE_NAME, freq=eng.MESHCORE_FREQ,
     meshcom_name=eng.htmllib.escape(eng.MESHCOM_NAME), meshcom_freq=eng.MESHCOM_FREQ,
-    table="<TABLEMARK/>", extra_sections="", src_port="ttyUSB0")
+    table="<TABLEMARK/>", keymap_bar="<KEYMAPBAR/>", extra_sections="", src_port="ttyUSB0")
 want_h2 = ("DK0MAV mc&sup2;-Peine-Node &mdash; MeshCore: Amateurfunk Peine FTZ, 869.618 MHz"
            " &nbsp;|&nbsp; MeshCom: DK0MAV-12 &quot;Digipeater Peine&quot;, 433.175 MHz")
 check("t2 h2 shows full MeshCore + MeshCom identity", want_h2 in page, page[:400])

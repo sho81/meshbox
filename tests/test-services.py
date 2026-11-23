@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-License-Identifier: MIT
 """Service regression suite — the two companion daemons (F13, F16).
 
   t1  F13 check_epoch: type/unit/plausibility validation table
@@ -16,6 +15,9 @@
   t8  F16 relay flush(): chronological order, file append, queue cleared;
           flush failure keeps pending lines
   t9  F16 relay trim_if_needed(): over-cap live log keeps NEWEST bytes
+  t10 F31 POST /keymap-update: first click spawns the helper (stub), re-click
+          while running -> 409, after exit -> 429 cooldown + SKIPPED status
+          file (no network: stub script instead of the real helper)
 
 Run:  python3 test-services.py [time-sync-path] [relay-path]
 Defaults resolve for both the repo root and the flat staging layout.
@@ -26,6 +28,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -125,6 +128,48 @@ st3, b3 = req("/nope", b"{}")
 check("t4 POST /settime junk -> 400, implausible -> 400, unknown path -> 404",
       st1 == 400 and st2 == 400 and st3 == 404
       and not b2["ok"] and "range" in b2["error"])
+
+# --- t10 F31 POST /keymap-update: spawn, single-flight, cooldown --------------
+KD = tempfile.mkdtemp(prefix="f31-svc-")
+stub = os.path.join(KD, "keymap-stub.py")
+with open(stub, "w") as f:
+    f.write("#!/usr/bin/python3\n"
+            "import argparse, json, os, time\n"
+            "p = argparse.ArgumentParser()\n"
+            "p.add_argument('--state-dir', required=True)\n"
+            "p.add_argument('--status-only')\n"
+            "p.add_argument('--detail', default='')\n"
+            "a = p.parse_args()\n"
+            "if a.status_only:\n"
+            "    json.dump({'last_run': time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()),\n"
+            "               'result': a.status_only, 'detail': a.detail},\n"
+            "              open(os.path.join(a.state_dir, 'keymap-status.json'), 'w'))\n"
+            "else:\n"
+            "    time.sleep(2)   # stay 'running' long enough for the single-flight check\n"
+            "    open(os.path.join(a.state_dir, 'stub-ran'), 'w').write('x')\n")
+ts.STATE_DIR = KD
+ts.KEYMAP_SCRIPT = stub
+ts.KEYMAP_STAMP = os.path.join(KD, ".keymap-last")
+st, body = req("/keymap-update", b"{}")
+check("t10a F31 keymap first click starts run",
+      st == 200 and body.get("ok") and body.get("started"))
+st2, body2 = req("/keymap-update", b"{}")        # stub still asleep -> single-flight
+check("t10b F31 re-click while running -> 409",
+      st2 == 409 and body2.get("skipped")
+      and body2.get("reason") == "update already running")
+ts.KEYMAP_RUN["proc"].wait(timeout=15)           # stub done -> cooldown now guards
+st3, body3 = req("/keymap-update", b"{}")
+check("t10c F31 click inside cooldown -> 429 skipped",
+      st3 == 429 and body3.get("skipped") and "min" in body3.get("reason", ""))
+check("t10d F31 run spawned the helper",
+      os.path.isfile(os.path.join(KD, "stub-ran")))
+try:
+    with open(os.path.join(KD, "keymap-status.json")) as f:
+        sj = json.load(f)
+except OSError:
+    sj = {}
+check("t10e F31 refusal logged to keymap-status.json (SKIPPED + reason)",
+      sj.get("result") == "SKIPPED" and "ago" in sj.get("detail", ""))
 srv.shutdown()
 for name, real in (("ctypes", _real_ctypes), ("ctypes.util", _real_ctypes_util)):
     if real is not None:

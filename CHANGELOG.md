@@ -22,6 +22,12 @@ engine comments and test file names.
 - F30: **signal stairs** — 8-step Unicode staircase (▁..█) visualizes each
   live SNR (scale −20..+8 dB, per-box `bar_min`/`bar_max`), dB number and
   Best/Worst columns untouched; new `tests/test-f30.py`
+- F31: **map.meshcore.io deep links** — node names link to the official map
+  when the full public key is known locally (`mesh-keys.json`, prefix→key);
+  `mesh-keymap.py` refreshes it from the public map list (~19 MB gzipped,
+  streamed), dashboard button + `/keymap-update` service route (single-flight,
+  15 min cooldown) + "Last node lookup" status label; optional `node_link_url`;
+  new `tests/test-f31.py`
 
 ## 2026-11-21
 
