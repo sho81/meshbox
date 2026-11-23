@@ -10,7 +10,7 @@ Endpoints:
     GET  /           -> {"ok": true, "now_utc": "..."}          (health check)
     POST /settime    body: {"epoch": <seconds since 1970>}      (sets system time)
                       -> {"ok": true, "applied_epoch": N, "delta_s": D, "now_utc": "..."}
-    POST /settime    body: {"epoch": ..., "target": "/dev/ttyUSBx"}   (F24)
+    POST /settime    body: {"epoch": ..., "target": "/dev/ttyUSBx|/dev/ttyACMx"}   (F24)
                       -> {"ok": true, "queued": true, "target": "..."}
                       Writes a one-shot request marker; the dashboard engine
                       (mesh-neighbors.py, cron every minute) applies it to the
@@ -22,7 +22,7 @@ Validation (defense in depth):
     * absolute range 1e8..4e9  -> catches unit bugs such as milliseconds
                                   (years ~1973 .. ~2096)
     * |epoch - now| <= 5 y     -> sane maximum for a drifted box with no RTC
-    * target must be /dev/ttyUSB<digits> (the engine re-validates)
+    * target must be /dev/tty<USB|ACM><digits> (the engine re-validates)
 
 Runs as root (clock_settime needs CAP_SYS_TIME). Stdlib only, so it uses the
 system python3 and has no venv dependency. Logs to stderr -> journal:
@@ -44,7 +44,7 @@ MAX_DELTA_S = 5 * 366 * 86400  # 5 years
 
 # F24: request marker consumed by mesh-neighbors.py (must match its CONFIG).
 REQUEST_FILE = "/var/lib/meshcore/settime-request.json"
-TARGET_RE = re.compile(r"^/dev/ttyUSB\d+$")
+TARGET_RE = re.compile(r"^/dev/tty(?:USB|ACM)\d+$")
 
 
 def queue_serial_request(target, epoch_s, now_dt):
@@ -129,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
         if target:
             if not TARGET_RE.fullmatch(target):
                 return self._json(400, {"ok": False,
-                                        "error": "target must be /dev/ttyUSB<digits> or empty"})
+                                        "error": "target must be /dev/ttyUSB|ttyACM<digits> or empty"})
             try:
                 queue_serial_request(target, epoch, now)
             except OSError as e:

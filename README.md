@@ -24,9 +24,15 @@ of paths you can adapt.
 | **PiUPS+ / Power** | UPS status bits + five traced electrical readings, parsed from the piupsmonitor daemon's debug log tail — zero extra I²C traffic |
 
 All tables are sortable (third click restores device order) and pre-sorted with visible
-sort indicators; timestamps tick live in the browser. The features carry stable internal
-change IDs (F1–F26) which also appear in engine comments and test file names — decoded
+sort indicators — the nodes table opens sorted by Last seen (freshest first). Timestamps
+tick live in the browser. The features carry stable internal
+change IDs (F1–F28) which also appear in engine comments and test file names — decoded
 in [FEATURES.md](FEATURES.md).
+
+One engine file can serve several boxes (F27): an optional `box-config.json`
+next to the script overrides page title, station identity, serial port family
+(e.g. `/dev/ttyACM*`) and output dir — see [deploy/second-box/](deploy/second-box/).
+Branding/identity values are deployment-private and live only on each box.
 
 ## Layout
 
@@ -92,6 +98,8 @@ python3 tests/test-f23.py mesh-neighbors.py
 python3 tests/test-f24.py mesh-neighbors.py mesh-time-sync.py
 python3 tests/test-f25.py mesh-neighbors.py
 python3 tests/test-f26.py mesh-neighbors.py
+python3 tests/test-f27.py mesh-neighbors.py
+python3 tests/test-f28.py mesh-neighbors.py
 ```
 
 All suites run on every push via GitHub Actions (`.github/workflows/test.yml`).

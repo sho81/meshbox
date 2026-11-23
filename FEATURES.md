@@ -1,4 +1,4 @@
-# Feature history (F1–F26)
+# Feature history (F1–F28)
 
 F-numbers are stable internal change IDs. They appear in engine comments
 (e.g. "F16 moves the live log to tmpfs") and in test file names
@@ -255,3 +255,37 @@ after the USB watchdog and before Storage).
 - The cron ok-line grew a `net eth0=UP/192.168.3.10 wlan0=UP/…` tag.
 
 Regression suite: `test-f26.py` (18 checks, both iproute2 dialects).
+
+## F27 · Per-box overlay config — second-box rollout — 2026-11-23
+
+The engine moved to the second station by config only — same code file, no
+fork. `box-config.json` next to the script (same placement pattern as
+`mesh-node-names.json`) optionally overrides: page `<title>`, the `<h2>`
+station prefix, the four identity strings (MeshCore node name + QRG, MeshCom
+unit name + QRG), `ports_glob` (e.g. `/dev/ttyACM*` for ESP32/CH340 CDC-ACM
+adapters) and `www_dir`. Every key is optional and absent means the original
+box's values — so the first deployment needs no file at all and its rendered
+page stays byte-identical.
+
+- The sysfs tty glob used by the USB tables/watchdog follows the configured
+  serial family automatically (`ttyACM*` ports → `ttyACM*` in `/sys/class/tty`).
+- F24's manual time-sync target validation (engine AND service) now accepts
+  `ttyACM` ports next to `ttyUSB`.
+- Config files are inserted verbatim into `<title>`/`<h2>` — authors keep
+  them HTML-safe. Broken JSON or wrong shapes are ignored with a warning.
+- Identity/branding values are deployment-private: they live on each box;
+  the repo ships only placeholder examples in `deploy/second-box/`.
+
+Regression suite: `test-f27.py` (11 checks: defaults preserved, full/partial
+overlay, broken config, ttyACM targets both sides, rendered page overlay).
+
+## F28 · Nodes table opens sorted by "Last seen" — 2026-11-23
+
+The merged nodes table's initial sort (what you see before any click) is now
+**Last seen ascending = freshest first**, matching the order the engine
+already writes the rows in server-side. The little ▲ indicator sits on that
+column from the start; click behavior is unchanged (asc → desc → device
+order, and "device order" now *is* freshest-first too). Every other table
+keeps its first-column initial sort.
+
+Regression suite: `test-f28.py` (3 checks).

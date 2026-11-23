@@ -45,6 +45,7 @@ check("t1 old FREQ constant gone", not hasattr(eng, "FREQ"))
 
 page = eng.HTML_TEMPLATE.format(
     iso=datetime(2026, 10, 31, 18, 0, 0, tzinfo=timezone.utc).isoformat(timespec="seconds"),
+    title=eng.PAGE_TITLE, station=eng.STATION,
     started_meta="", sublines="", node=eng.NODE_NAME, freq=eng.MESHCORE_FREQ,
     meshcom_name=eng.htmllib.escape(eng.MESHCOM_NAME), meshcom_freq=eng.MESHCOM_FREQ,
     table="<TABLEMARK/>", extra_sections="", src_port="ttyUSB0")

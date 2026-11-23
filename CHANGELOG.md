@@ -4,6 +4,17 @@ Deploy log by date. Feature-by-feature documentation lives in
 [FEATURES.md](FEATURES.md); the F-numbers there are the same IDs you find in
 engine comments and test file names.
 
+## 2026-11-23
+
+- F27: **per-box overlay config** — optional `box-config.json` next to the
+  engine overrides title, station identity strings, `ports_glob` (ttyACM
+  serial family works end-to-end now, incl. F24 settime targets) and
+  `www_dir`; defaults unchanged, so the first box needs no file and its
+  page stays byte-identical. `deploy/second-box/` documents a config-only
+  re-brand deployment; new `tests/test-f27.py`
+- F28: **nodes table initial sort = Last seen** (freshest first, indicator
+  arrow included); other tables keep their initial sort; new `tests/test-f28.py`
+
 ## 2026-11-21
 
 - F26: **Network interfaces section** — one row per interface (lo omitted):

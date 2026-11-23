@@ -1,0 +1,10 @@
+{
+  "title": "EXAMPLE Station MeshCore Neighbors",
+  "station": "EXAMPLE Station",
+  "node_name": "Example MeshCore Node",
+  "meshcore_freq": "869.618 MHz",
+  "meshcom_name": "EXAMPLE-12 Example Unit",
+  "meshcom_freq": "433.175 MHz",
+  "ports_glob": "/dev/ttyACM*",
+  "www_dir": "/var/www/mesh"
+}

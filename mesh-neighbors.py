@@ -7,7 +7,7 @@ Runs on the DK0MAV mc2-Peine-Node raspi, normally invoked every minute
 by cron through /usr/local/bin/meshcli-neighbors.sh. Must run with the python of
 /opt/venvs/meshcore-venv (pyserial is provided by it).
 
-Probe: every run ALL /dev/ttyUSB* ports are probed under per-port flocks
+Probe: every run ALL ports under PORTS_GLOB are probed under per-port flocks
 (/var/lock/meshcore-ttyUSBN.lock) so an interactive session on one port never blocks the
 other. Each port is woken with a bare CR, then answered to "neighbors":
  - reply contains neighbor lines or "-none-"  -> role = MeshCore repeater
@@ -95,6 +95,60 @@ QUIET_MS = 500
 # that keep the cron probe and an interactive meshcli console apart.
 WWW_DIR = "/var/www/html"
 HTML_OUT = os.path.join(WWW_DIR, "neighbors.html")
+
+# ============================================================================
+# F27: optional per-box overlay (second-box rollout). box-config.json sits
+# next to this script - same pattern as mesh-node-names.json - so ONE engine
+# file serves several boxes. Every key is optional; anything absent keeps the
+# DK0MAV values above, so the original box needs no file at all. Private
+# branding (station names, identities, QRGs) lives in this file on each box -
+# the public repo ships only an example with placeholders.
+#   { "title": "...",          -> HTML <title>  (inserted verbatim, keep HTML-safe)
+#     "station": "...",        -> header <h2> prefix (verbatim, HTML-safe)
+#     "node_name": "...", "meshcore_freq": "...",
+#     "meshcom_name": "...", "meshcom_freq": "...",
+#     "ports_glob": "/dev/ttyACM*",
+#     "www_dir": "/var/www/mesh" }
+BOX_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "box-config.json")
+
+
+def _load_box_config():
+    try:
+        with open(BOX_CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        # before log() exists; cron redirects stderr into the log file anyway
+        print(f"warning: ignoring {BOX_CONFIG_FILE}: {e}", file=sys.stderr)
+        return {}
+
+
+_BOX = _load_box_config()
+if isinstance(_BOX.get("node_name"), str):
+    NODE_NAME = _BOX["node_name"]
+if isinstance(_BOX.get("meshcore_freq"), str):
+    MESHCORE_FREQ = _BOX["meshcore_freq"]
+if isinstance(_BOX.get("meshcom_name"), str):
+    MESHCOM_NAME = _BOX["meshcom_name"]
+if isinstance(_BOX.get("meshcom_freq"), str):
+    MESHCOM_FREQ = _BOX["meshcom_freq"]
+if isinstance(_BOX.get("ports_glob"), str):
+    PORTS_GLOB = _BOX["ports_glob"]
+if isinstance(_BOX.get("www_dir"), str):
+    WWW_DIR = _BOX["www_dir"]
+    HTML_OUT = os.path.join(WWW_DIR, "neighbors.html")
+# Page furniture defaults (the h2 default keeps the &sup2; entity, so these
+# are inserted verbatim - config authors keep them HTML-safe).
+PAGE_TITLE = _BOX.get("title") if isinstance(_BOX.get("title"), str) \
+    else "DK0MAV MeshCore Neighbors"
+STATION = _BOX.get("station") if isinstance(_BOX.get("station"), str) \
+    else "DK0MAV mc&sup2;-Peine-Node"
+# sysfs tty glob for the USB tables/watchdog follows the serial family the
+# box actually uses (/dev/ttyACM* -> /sys/class/tty/ttyACM*).
+TTY_SYS_GLOB = "/sys/class/tty/" + os.path.basename(PORTS_GLOB)
 
 
 def lock_file_for(port):
@@ -601,7 +655,7 @@ def load_manual_sync_request():
     except OSError as e:
         log(f"warning: could not remove {SETTIME_REQUEST}: {e}")
     target, epoch = data.get("target"), data.get("epoch")
-    if (not isinstance(target, str) or not re.fullmatch(r"/dev/ttyUSB\d+", target)
+    if (not isinstance(target, str) or not re.fullmatch(r"/dev/tty(?:USB|ACM)\d+", target)
             or not isinstance(epoch, int) or isinstance(epoch, bool)
             or not (10 ** 8 < epoch < 4 * 10 ** 9)):
         log(f"manual-sync request discarded: bad shape {str(data)[:120]}")
@@ -960,7 +1014,7 @@ def _usb_dir_of(resolved):
     return None
 
 
-def _tty_to_usb(tty_glob="/sys/class/tty/ttyUSB*"):
+def _tty_to_usb(tty_glob=None):
     """Map USB device dir name -> sorted list of the tty names it provides.
 
     Resolves through /sys/class/tty (kernel-guaranteed symlinks into the device
@@ -968,7 +1022,7 @@ def _tty_to_usb(tty_glob="/sys/class/tty/ttyUSB*"):
     /dev, so realpath("/dev/ttyUSB0") would just return itself.
     """
     mapping = {}
-    for dev in glob.glob(tty_glob):
+    for dev in glob.glob(tty_glob or TTY_SYS_GLOB):
         try:
             resolved = os.path.realpath(dev)
         except OSError:
@@ -1072,7 +1126,7 @@ def storage_info(block_dir="/sys/block", mounts_file="/proc/mounts"):
     return disks
 
 
-def scan_usb_devices(usb_dir="/sys/bus/usb/devices", tty_glob="/sys/class/tty/ttyUSB*",
+def scan_usb_devices(usb_dir="/sys/bus/usb/devices", tty_glob=None,
                      block_dir="/sys/block"):
     """Enumerate the USB peripherals worth watching for presence.
 
@@ -1563,7 +1617,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>DK0MAV MeshCore Neighbors</title>
+<title>{title}</title>
 <meta http-equiv="refresh" content="58">   <!-- auto-reload just before each cron minute -->
 <meta name="updated" content="{iso}">
 {started_meta}
@@ -1591,7 +1645,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h2>DK0MAV mc&sup2;-Peine-Node &mdash; MeshCore: {node}, {freq} &nbsp;|&nbsp; MeshCom: {meshcom_name}, {meshcom_freq}</h2>
+<h2>{station} &mdash; MeshCore: {node}, {freq} &nbsp;|&nbsp; MeshCom: {meshcom_name}, {meshcom_freq}</h2>
 {sublines}
 <h3>MeshCore Neighbors</h3>
 {table}
@@ -1635,7 +1689,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 # Client-side table sorting (injected verbatim; no .format placeholders inside).
 # Every sortable header shows an indicator from the start: faint up/down cross on all
 # columns (they are clickable), bright arrow on the active column with its direction.
-# Tables load pre-sorted by their first column (asc); a click cycles asc -> desc -> device order.
+# Tables load pre-sorted (nodes table: "Last seen" asc=freshest first; others:
+# first column asc); a click cycles asc -> desc -> device order.
 SORT_JS = """(function () {
     'use strict';
     document.querySelectorAll('table.sortable').forEach(function (t) {
@@ -1683,7 +1738,13 @@ SORT_JS = """(function () {
                 activate(th, idx, (mode === '') ? 'asc' : (mode === 'asc' ? 'desc' : ''));
             };
         })(ths[i], i);
-        if (ths.length) activate(ths[0], 0, 'asc');   // initial state: first column asc
+        if (ths.length) {
+            // Initial state: the merged nodes table opens sorted by "Last seen"
+            // (column 2, age ascending = freshest first, matching the server
+            // row order); every other table starts with its first column asc.
+            var init = (t.id === 'tbl-nodes' && ths.length > 2) ? 2 : 0;
+            activate(ths[init], init, 'asc');
+        }
     });
 })();"""
 
@@ -1789,6 +1850,7 @@ def write_html(rows, now_utc, nodes_ever=None, usb_infos=None, src_port="-", ntp
 
     page = HTML_TEMPLATE.format(
         iso=now_utc.isoformat(timespec="seconds"),
+        title=PAGE_TITLE, station=STATION,
         started_meta=started_meta, sublines=sublines,
         node=NODE_NAME, freq=MESHCORE_FREQ,
         meshcom_name=htmllib.escape(MESHCOM_NAME), meshcom_freq=MESHCOM_FREQ,
@@ -1819,7 +1881,7 @@ def main():
 
     ports = sorted(glob.glob(PORTS_GLOB))
     if not ports:
-        log("ERROR: no /dev/ttyUSB* devices present")
+        log(f"ERROR: no {PORTS_GLOB} devices present")
         return 1
 
     now_utc = datetime.now(timezone.utc)
