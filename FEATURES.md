@@ -372,3 +372,20 @@ Regression suite: `test-f32.py` (18 checks: --mheard parsing incl. units
 and garbage, ever-state merge/dedup/gw stickiness, table markup and
 ordering, section gating, sort init). `test-f21.py`/`test-f28.py` adapted
 to the new template slot and sort init.
+
+## F34 · USB serial strings + chip MAC in the tables — 2026-11-28
+
+Every tracked USB device exposes a serial string in `/sys` — the engine now
+surfaces it. The "USB serial devices" table gained a **Serial / MAC** column:
+ESP32-S2/S3/C3 boards with native USB (USB-Serial/JTAG) expose the *chip MAC*
+as that string, shown as-is and labeled by tooltip; bridge chips (CP210x,
+CH9102...) expose their own chip serial instead — the ESP behind a bridge
+never reveals its MAC over USB, so those rows carry the chip serial (or "-"
+if none) with an explanatory tooltip. This also tells at a glance which
+boards can be flashed by esptool without pressing BOOT (see the F12-family
+watchdog section for the same identity strings: watchdog Details now append
+`SN <serial>`, so a hub-less stick like an SDR receiver is identifiable too).
+
+Regression suite: `test-f34.py` (10 checks: MAC regex shapes, MAC vs. bridge
+cell wording, bare-hex normalization, HTML escaping, header position, and
+the watchdog `SN` detail on a synthetic /sys tree).

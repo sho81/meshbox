@@ -6,6 +6,11 @@ engine comments and test file names.
 
 ## 2026-11-28
 
+- F34: **USB serial strings + chip MAC in the tables** — new "Serial / MAC"
+  column in the USB serial devices table (native-USB ESPs expose the chip MAC
+  as the USB serial string; bridge chips expose their own serial, tooltip says
+  why no MAC is visible); watchdog Details rows append `SN <serial>` so any
+  tracked stick is identifiable; new `tests/test-f34.py` (10 checks)
 - Fix (F12 watchdog): a device that **stays** OFFLINE no longer re-stamps its
   transition time every run — the "Since (status age)" column now shows the
   true offline duration instead of a permanent "0 s ago"; `last_seen`/state

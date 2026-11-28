@@ -416,10 +416,15 @@ def boot_time_utc(now_utc, uptime_file="/proc/uptime", stat_file="/proc/stat"):
 
 USB_PATH_SEG_RE = re.compile(r"^\d+-[\d.-]+$")
 
+# F34: ESP32-S2/S3/C3 with native USB (USB-Serial/JTAG) expose the chip MAC as
+# the USB serial string, e.g. "44:1B:F6:69:DC:CC". Bridge chips (CP210x,
+# CH9102...) expose their own chip serial instead - shown, but never a MAC.
+USB_MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$|^[0-9A-Fa-f]{12}$")
+
 
 def usb_os_info(port):
     """OS-level USB identity of a tty device from /sys (no serial traffic)."""
-    info = {"product": "-", "vid_pid": "-", "usb_path": "-"}
+    info = {"product": "-", "vid_pid": "-", "usb_path": "-", "serial": "-"}
     link = os.path.realpath(os.path.join("/sys/class/tty", os.path.basename(port)))
     for part in reversed(link.split("/")):
         if USB_PATH_SEG_RE.match(part):          # e.g. 1-1.2 (bus-port chain)
@@ -430,10 +435,13 @@ def usb_os_info(port):
         if os.path.isfile(os.path.join(d, "idVendor")):
             vid, pid = read_sysfile(os.path.join(d, "idVendor")), read_sysfile(os.path.join(d, "idProduct"))
             prod = read_sysfile(os.path.join(d, "product"))
+            ser = read_sysfile(os.path.join(d, "serial"))
             if vid and pid:
                 info["vid_pid"] = f"{vid}:{pid}"
             if prod:
                 info["product"] = prod
+            if ser:
+                info["serial"] = ser.strip().upper()
             break
         parent = os.path.dirname(d)
         if parent == d:
@@ -705,6 +713,21 @@ def probe_port(port, serial_mod, now_utc=None, manual=None):
 ROLE_LABEL = {"meshcore": "MeshCore repeater", "meshcom": "MeshCom"}
 
 
+def serial_cell_html(info):
+    """F34: Serial/MAC cell. Native-USB ESPs (USB-Serial/JTAG) expose the chip
+    MAC as the USB serial string; bridge chips expose their own chip serial."""
+    ser = str(info.get("serial") or "-")
+    if ser == "-":
+        return '<td title="no USB serial string exposed">-</td>'
+    if USB_MAC_RE.match(ser):
+        if len(ser) == 12:
+            ser = ":".join(ser[i:i + 2] for i in range(0, 12, 2))
+        return ('<td title="MAC address (chip MAC, exposed as USB serial string '
+                f'by native USB-Serial/JTAG)">{htmllib.escape(ser)}</td>')
+    return ('<td title="USB serial string of the bridge chip (the ESP behind it '
+            f'exposes no MAC over USB)">{htmllib.escape(ser)}</td>')
+
+
 def render_usb_html(infos):
     trs = []
     for i, p in enumerate(infos):
@@ -715,12 +738,13 @@ def render_usb_html(infos):
             f'<tr data-order="{i}">'
             f'<td>{p["port"]}</td>'
             f'<td>{htmllib.escape(p["product"])}</td>'
+            f"{serial_cell_html(p)}"
             f'<td>{htmllib.escape(p["usb_path"])}</td>'
             f'<td data-sort="{ROLE_LABEL.get(p["role"], "?")}">{role}</td>'
             f'<td>{p["details"]}</td></tr>')
     return ('<table class="sortable" id="tbl-usb"><thead><tr>'
-            '<th>Port</th><th>USB device</th><th>USB path</th><th>System</th>'
-            f'<th>Details</th></tr></thead><tbody>{"".join(trs)}</tbody></table>')
+            '<th>Port</th><th>USB device</th><th>Serial / MAC</th><th>USB path</th>'
+            f'<th>System</th><th>Details</th></tr></thead><tbody>{"".join(trs)}</tbody></table>')
 
 
 def load_ports_state():
@@ -1310,7 +1334,11 @@ def scan_usb_devices(usb_dir="/sys/bus/usb/devices", tty_glob=None,
 
         # F19: size + mount info moved to the dedicated Storage section; keep only the
         # bare block device name here so watchdog rows still map 1:1 onto storage rows.
+        # F34: append the USB serial string so every tracked device (even a hub-less
+        # stick like the NESDR receiver) is identifiable without opening the case.
         details = list(tts) + blks
+        if serial:
+            details.append(f"SN {serial}")
 
         kinds = []
         if tts:

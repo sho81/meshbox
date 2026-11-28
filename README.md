@@ -16,7 +16,7 @@ of paths you can adapt.
 |---|---|
 | **Neighbors** | merged table of every node ever heard: key prefix, name (deep-linked to the official MeshCore map when the full key is known), last seen (d/h/m), live SNR (with an 8-step signal-stair glyph), best/worst SNR, sightings. All-nodes-ever history survives reboots via a small JSON state file |
 | **MeshCom Neighbors** | second table for the 433 cm MeshCom side, from the device's `--mheard` console reply: station (GW badge), last heard, live SNR (stairs), best/worst, sightings — kept as an all-stations-ever state file because the device itself only remembers 12 hours |
-| **USB serial devices** | every `/dev/ttyUSB*` probed and classified (MeshCore repeater vs. MeshCom) using OS info + one serial command per port; survives USB port swaps |
+| **USB serial devices** | every `/dev/ttyUSB*` probed and classified (MeshCore repeater vs. MeshCom) using OS info + one serial command per port; survives USB port swaps; Serial/MAC column (native-USB ESPs expose the chip MAC) |
 | **USB device watchdog** | ONLINE/OFFLINE state machine for every tracked peripheral (serial bridges, storage sticks) driven purely from `/sys` enumeration — catches a stick that silently disappeared, even across reboots |
 | **Network interfaces** | one row per interface (lo omitted): link state, MAC and every IPv4/IPv6 address with scope labels (global/ULA/link) and dynamic-lease hints; default route tagged, Hamnet referrals as footer line — your "how do I connect here" table |
 | **Storage** | every persistent physical disk (`sd*`, `mmcblk*`, `hd*`, NVMe; zram/loop excluded): total size, used, available, %, mount points — df semantics summed per disk |
