@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# SPDX-License-Identifier: MIT
 """Core-engine regression suite — the pre-F18 feature base (F1/F4/F7/F8/F11/F12).
 
 The per-feature suites test-f18+ cover the later features; this suite backfills
@@ -24,6 +23,7 @@ hardware-free against synthetic inputs:
   t10 F11 read_piups: missing log -> None; no matching lines -> None
   t11 F12 merge_usb_state: ONLINE keeps since, return-after-offline resets it,
           OFFLINE keeps last_seen and stamps transition
+  t11b staying OFFLINE keeps the original transition ("Since" shows true age)
   t12 F12 save/load usb state round trip keeps the file atomic (F22 pattern)
 
 Run:  python3 test-core.py [engine-path]      (default: ./mesh-neighbors.py)
@@ -168,7 +168,8 @@ with tempfile.TemporaryDirectory() as d:
 cur = {"k1": {"product": "bridge"}, "k2": {"product": "stick"}}
 prev = {"k1": {"product": "bridge", "status": "ONLINE", "since": "2026-11-01 08:00:00 UTC", "last_seen": "2026-11-02 11:59:00 UTC"},
         "k2": {"product": "stick", "status": "OFFLINE", "since": "2026-11-02 11:30:00 UTC", "last_seen": "2026-11-02 11:29:00 UTC"},
-        "k3": {"product": "gone", "status": "ONLINE", "since": "2026-11-01 08:00:00 UTC", "last_seen": "2026-11-02 11:59:00 UTC"}}
+        "k3": {"product": "gone", "status": "ONLINE", "since": "2026-11-01 08:00:00 UTC", "last_seen": "2026-11-02 11:59:00 UTC"},
+        "k4": {"product": "still gone", "status": "OFFLINE", "since": "2026-11-02 11:00:00 UTC", "last_seen": "2026-11-02 10:59:00 UTC"}}
 m = mn.merge_usb_state(cur, prev, NOW)
 check("t11 merge_usb_state: since-keeping, return, offline transition",
       m["k1"]["since"] == "2026-11-01 08:00:00 UTC"
@@ -176,6 +177,10 @@ check("t11 merge_usb_state: since-keeping, return, offline transition",
       and m["k2"]["status"] == "ONLINE" and m["k2"]["last_seen"] == "2026-11-02 12:00:00 UTC"
       and m["k3"]["status"] == "OFFLINE" and m["k3"]["since"] == "2026-11-02 12:00:00 UTC"
       and m["k3"]["last_seen"] == "2026-11-02 11:59:00 UTC")     # frozen on purpose
+check("t11b staying OFFLINE keeps the original transition",
+      m["k4"]["status"] == "OFFLINE"
+      and m["k4"]["since"] == "2026-11-02 11:00:00 UTC"
+      and m["k4"]["last_seen"] == "2026-11-02 10:59:00 UTC")
 
 with tempfile.TemporaryDirectory() as d:
     statef = os.path.join(d, "usb-state.json")

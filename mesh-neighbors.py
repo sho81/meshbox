@@ -1356,8 +1356,12 @@ def merge_usb_state(current, prev_devices, now_utc):
     for key, prev in (prev_devices or {}).items():
         if key not in current:
             d = dict(prev)
+            # Only stamp the transition on the run that actually lost the
+            # device; a device that stays OFFLINE keeps its original "since"
+            # so the table can show the true offline duration.
+            if prev.get("status") != "OFFLINE" or not prev.get("since"):
+                d["since"] = now_iso
             d["status"] = "OFFLINE"
-            d["since"] = now_iso
             out[key] = d                  # last_seen unchanged on purpose
     return out
 

@@ -4,6 +4,13 @@ Deploy log by date. Feature-by-feature documentation lives in
 [FEATURES.md](FEATURES.md); the F-numbers there are the same IDs you find in
 engine comments and test file names.
 
+## 2026-11-28
+
+- Fix (F12 watchdog): a device that **stays** OFFLINE no longer re-stamps its
+  transition time every run — the "Since (status age)" column now shows the
+  true offline duration instead of a permanent "0 s ago"; `last_seen`/state
+  shapes unchanged, new `tests/test-core.py` t11b
+
 ## 2026-11-23
 
 - F27: **per-box overlay config** — optional `box-config.json` next to the

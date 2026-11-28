@@ -77,6 +77,8 @@ ONLINE/OFFLINE state machine for every tracked peripheral (serial bridges,
 storage sticks): status, humanized status age, last confirmed. Identity key
 is `vendor:product[:serial]:port path`; pure `/sys` enumeration, state
 survives reboots (`usb-state.json`). Catches a stick that silently vanished.
+(2026-11-28 fix: a device that stays OFFLINE keeps its original transition
+stamp, so the status-age column shows the true offline duration.)
 
 ## F13 · Clock & NTP everywhere + emergency time sync — 2026-10-11
 
